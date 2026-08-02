@@ -1,7 +1,9 @@
 import numpy as np
+import pytest
 
 from bayesian_knn.experiments.classification_2d import (
     make_2d_dataset,
+    plot_probability_heatmap,
     run_2d_classification_experiment,
 )
 
@@ -48,3 +50,15 @@ def test_each_supported_dataset_can_run_through_the_generic_experiment():
         assert result.y_pred.shape == result.y_test.shape
         assert 0.0 <= result.test_accuracy <= 1.0
         assert result.probability_class in result.model.classes_
+
+
+def test_multiclass_plot_creates_one_probability_panel_per_class():
+    pytest.importorskip("matplotlib")
+    result = run_2d_classification_experiment(
+        "iris",
+        dataset_parameters={"feature_indices": (2, 3)},
+        test_size=0.25,
+        model_parameters=_small_model_parameters(),
+    )
+    figure = plot_probability_heatmap(result, grid_size=12)
+    assert len(figure.axes) == 6

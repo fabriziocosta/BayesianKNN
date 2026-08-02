@@ -212,6 +212,21 @@ def probability_surface(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Evaluate one class probability over a rectangular feature-space grid."""
 
+    xx, yy, probabilities = _probability_grid(
+        result,
+        padding=padding,
+        grid_size=grid_size,
+    )
+    class_index = _class_probability_index(result, class_label)
+    return xx, yy, probabilities[:, :, class_index]
+
+
+def _probability_grid(
+    result: Classification2DResult,
+    *,
+    padding: float,
+    grid_size: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     x_min, x_max = result.X[:, 0].min() - padding, result.X[:, 0].max() + padding
     y_min, y_max = result.X[:, 1].min() - padding, result.X[:, 1].max() + padding
     xx, yy = np.meshgrid(
@@ -219,9 +234,10 @@ def probability_surface(
         np.linspace(y_min, y_max, grid_size),
     )
     grid = np.c_[xx.ravel(), yy.ravel()]
-    class_index = _class_probability_index(result, class_label)
-    probability = result.model.predict_proba(grid)[:, class_index].reshape(xx.shape)
-    return xx, yy, probability
+    probabilities = result.model.predict_proba(grid).reshape(
+        xx.shape + (len(result.model.classes_),)
+    )
+    return xx, yy, probabilities
 
 
 def plot_probability_heatmap(
@@ -232,51 +248,64 @@ def plot_probability_heatmap(
     class_label: Any | None = None,
     output_path: str | Path | None = None,
 ) -> Any:
-    """Plot and optionally save one class's model-averaged probability surface."""
+    """Plot probability surfaces, one panel per class for multiclass data."""
 
     import matplotlib.pyplot as plt
 
-    xx, yy, probability = probability_surface(
+    xx, yy, probabilities = _probability_grid(
         result,
         padding=padding,
         grid_size=grid_size,
-        class_label=class_label,
     )
-    selected_label = result.probability_class if class_label is None else class_label
-    fig, ax = plt.subplots(figsize=(9, 6.5))
-    heat = ax.contourf(
-        xx,
-        yy,
-        probability,
-        levels=np.linspace(0, 1, 41),
-        cmap="coolwarm",
-        vmin=0,
-        vmax=1,
-        alpha=0.90,
-    )
-    ax.contour(xx, yy, probability, levels=[0.5], linewidths=2, colors="black")
+    classes = result.model.classes_
+    labels = list(classes) if class_label is None and len(classes) > 2 else [
+        result.probability_class if class_label is None else class_label
+    ]
+    indices = [_class_probability_index(result, label) for label in labels]
+    figure_width = 9 if len(labels) == 1 else 6 * len(labels)
+    fig, axes = plt.subplots(1, len(labels), figsize=(figure_width, 6.5), squeeze=False)
+    axes = axes.ravel()
     colors = plt.get_cmap("tab10")
-    for index, label in enumerate(result.model.classes_):
-        mask = result.y_train == label
-        ax.scatter(
-            result.X_train[mask, 0],
-            result.X_train[mask, 1],
-            s=24,
-            color=colors(index),
-            edgecolors="white",
-            linewidths=0.45,
-            label=f"Class {label}",
+    predicted_indices = np.argmax(probabilities, axis=2)
+    for ax, label, index in zip(axes, labels, indices):
+        probability = probabilities[:, :, index]
+        heat = ax.contourf(
+            xx,
+            yy,
+            probability,
+            levels=np.linspace(0, 1, 41),
+            cmap="coolwarm",
+            vmin=0,
+            vmax=1,
+            alpha=0.90,
         )
-    colorbar = fig.colorbar(heat, ax=ax)
-    colorbar.set_label(f"Predicted probability of class {selected_label}")
-    ax.set_title(
+        if len(classes) == 2:
+            ax.contour(xx, yy, probability, levels=[0.5], linewidths=2, colors="black")
+        else:
+            boundaries = np.arange(0.5, len(classes) - 0.5, 1.0)
+            ax.contour(xx, yy, predicted_indices, levels=boundaries, linewidths=2, colors="black")
+        for class_index, class_value in enumerate(classes):
+            mask = result.y_train == class_value
+            ax.scatter(
+                result.X_train[mask, 0],
+                result.X_train[mask, 1],
+                s=24,
+                color=colors(class_index),
+                edgecolors="white",
+                linewidths=0.45,
+                label=f"Class {class_value}",
+            )
+        colorbar = fig.colorbar(heat, ax=ax)
+        colorbar.set_label(f"Predicted probability of class {label}")
+        ax.set_title(f"Class {label} probability")
+        ax.set_xlabel("Feature 1")
+        ax.set_ylabel("Feature 2")
+        ax.legend(loc="upper right")
+    fig.suptitle(
         f"Bayesian Monte Carlo k-NN on {result.dataset}\n"
         f"{result.model.n_estimators_} estimators, test accuracy = {result.test_accuracy:.3f}"
     )
-    ax.set_xlabel("Feature 1")
-    ax.set_ylabel("Feature 2")
-    ax.legend(loc="upper right")
-    fig.tight_layout()
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
     if output_path is not None:
         fig.savefig(output_path, dpi=180, bbox_inches="tight")
     return fig
