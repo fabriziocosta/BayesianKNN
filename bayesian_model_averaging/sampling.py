@@ -1,4 +1,4 @@
-"""Sampling of complete Bayesian k-NN model configurations."""
+"""Sampling of complete Bayesian model averaging model configurations."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ import numpy as np
 from scipy.special import gammaln, logsumexp
 from sklearn.base import clone
 from sklearn.model_selection import KFold, StratifiedKFold
-from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 
 from .model_families import make_model_estimator
 from .models import ModelDraw
@@ -46,7 +45,7 @@ class PreparedModel:
     subset_size: int
     subset_indices: np.ndarray
     subset_log_probability: float
-    neighborhood_size: int
+    neighborhood_size: int | None
     projection_scale_draw: Any
     subset_scale_draw: Any
     neighbor_scale_draw: Any
@@ -325,9 +324,6 @@ def score_prepared_model(prepared: PreparedModel) -> float:
                 (len(probabilities), len(prepared.classes)),
                 dtype=float,
             )
-            positions = {
-                label: index for index, label in enumerate(estimator.classes_)
-            }
             for local_index, label in enumerate(estimator.classes_):
                 aligned[:, class_positions[label]] = probabilities[:, local_index]
             smoothed = (aligned + prepared.alpha) / (

@@ -1,8 +1,9 @@
-# Bayesian Monte Carlo k-Nearest Neighbours
+# Bayesian Model Averaging
 
 ## Executive summary
 
-This project implements a new Bayesian formulation of the k-nearest neighbours (k-NN) algorithm based on **Bayesian model averaging** rather than hyperparameter optimization.
+This project implements Bayesian-style model averaging over k-nearest-neighbours,
+linear, and Gaussian predictive models rather than hyperparameter optimization.
 
 Traditional k-NN requires several modelling decisions, including the number of neighbours, the representation of the feature space, and often the amount of data used to construct the neighbourhood. These choices are typically treated as hyperparameters and selected through cross-validation or other optimization procedures, resulting in a single model that is then used for prediction.
 
@@ -12,7 +13,8 @@ Instead of searching for one “best” model, every reasonable k-NN configurati
 
 The implementation therefore replaces optimization with integration.
 
-Three independent sources of modelling uncertainty are explicitly represented:
+For the default k-NN family, three independent sources of modelling uncertainty
+are explicitly represented:
 
 - **Representation scale**, describing how the original feature space is viewed through random projections.
 - **Data scale**, describing how much of the training data participates in constructing an individual local model.
@@ -20,12 +22,19 @@ Three independent sources of modelling uncertainty are explicitly represented:
 
 Rather than fixing any of these quantities, they are treated as latent random variables and sampled from common probabilistic priors. A single reusable scale-prior mechanism governs all ordered scale variables, ensuring that the implementation remains conceptually simple and internally consistent.
 
+The estimator can also integrate across predictive model families. In
+`model_family="mixed"`, k-NN, linear, and Gaussian models are sampled from a
+uniform family prior and averaged using the same cross-validated
+pseudo-posterior weights. Gaussian classification draws additionally integrate
+over isotropic, diagonal, and full covariance structures under a simplicity
+prior.
+
 Each sampled model is evaluated using a cross-validated predictive pseudo-likelihood. These predictive scores determine the contribution of each model to the final Bayesian model average. Consequently, models that make better predictions naturally receive greater influence, while models that are less predictive contribute proportionally less.
 
 The resulting algorithm has several attractive properties:
 
 1. It avoids committing to a single arbitrary choice of neighbourhood size, projection dimension, or subset size. Instead, it integrates over uncertainty in these quantities.
-2. It preserves the simplicity and interpretability of k-nearest neighbours. Every sampled model remains a standard k-NN model; only the averaging procedure is new.
+2. It preserves the simplicity and interpretability of the component models. Every sampled model is a standard estimator from one of the supported families; only the averaging procedure is new.
 3. It is naturally parallel. Each Monte Carlo model is completely independent of every other model, allowing straightforward parallel execution across multiple processor cores.
 4. It is intentionally modular. Representation learning, scale priors, prediction, scoring, convergence diagnostics, and Bayesian averaging are independent components with clearly defined interfaces.
 
@@ -33,13 +42,14 @@ Conceptually, the framework shifts machine learning from selecting a single opti
 
 ## Goal and design principles
 
-This repository provides a production-quality, fully modular, scikit-learn-compatible Bayesian Monte Carlo k-nearest-neighbours classifier and regressor.
+This repository provides production-quality, modular, scikit-learn-compatible
+Bayesian model-averaging classifiers and regressors.
 
 The philosophy of the algorithm is:
 
 - do **not** optimize hyperparameters;
 - do **not** select a single model;
-- instead **integrate over an entire family of simple k-NN models**.
+- instead **integrate over an entire family of simple predictive models**.
 
 Every uncertain modelling choice is treated as a latent variable and integrated out by Monte Carlo sampling.
 
@@ -49,7 +59,7 @@ Each component should have a single responsibility. Avoid monolithic files.
 
 ## High-level architecture
 
-The algorithm has three independent modules.
+The algorithm has four independent modules.
 
 ### 1. Representation module
 
@@ -84,28 +94,71 @@ family can retain its full feature space when compression is not predictive.
 
 ### 2. Prediction module
 
-Prediction is standard weighted k-nearest neighbours.
+For k-NN draws, prediction is standard weighted k-nearest neighbours.
 
-The prediction module knows nothing about random projections. It receives transformed data only and supports both classification and regression using standard scikit-learn k-NN internally.
+The prediction module knows nothing about random projections. It receives
+transformed data only and supports classification and regression estimators
+selected by the sampled model family.
 
-### 3. Bayesian integration module
+### 3. Model-family module
+
+The estimator parameter `model_family` accepts:
+
+- `"knn"`: weighted k-NN, with the sampled neighbourhood size and
+  representation machinery;
+- `"linear"`: `LogisticRegression` for classification and `Ridge` for
+  regression;
+- `"gaussian"`: a generative Gaussian classifier or `BayesianRidge` for
+  regression;
+- `"mixed"`: a uniform prior over the three families.
+
+The default is `"mixed"`, so the renamed estimator averages all three families
+without requiring special configuration. Linear and Gaussian draws use the
+identity representation and do not sample k. Their family probability and any
+applicable covariance probability are retained in the model record and in
+`log_prior`.
+
+For Gaussian classification, covariance structure is itself a discrete latent
+variable sampled for every Gaussian draw, just as k is sampled for every k-NN
+draw. The structures are ordered by complexity:
+
+$$
+q_{\mathrm{iso}}=1,\qquad
+q_{\mathrm{diag}}=d,\qquad
+q_{\mathrm{full}}=\frac{d(d+1)}{2}.
+$$
+
+With simplicity parameter `lambda`, the prior is
+
+$$
+P(s)\propto\exp\{-\lambda\log(1+q_s)\}.
+$$
+
+The default `lambda=1` gives isotropic covariance the greatest prior mass,
+then diagonal, then full covariance when `d > 1`. The selected structure and
+its conditional probability are stored with the draw. Gaussian regression
+uses `BayesianRidge`; covariance structure is a classification-only choice.
+
+### 4. Bayesian integration module
 
 This module performs Monte Carlo sampling over complete models.
 
 Each Monte Carlo draw samples:
 
+- a model family when `model_family="mixed"`;
 - a representation family when `representation="mixed"`;
 - representation parameters within the selected representation family;
 - subset size;
 - subset;
-- neighbourhood size.
+- neighbourhood size for k-NN draws;
+- Gaussian covariance structure for Gaussian classification draws.
 
 It fits the corresponding model, computes its cross-validated pseudo-likelihood, and contributes to the Bayesian model average.
 
 ## Package structure
 
 ~~~
-bayesian_knn/
+bayesian_model_averaging/
 
     __init__.py
 
@@ -119,10 +172,10 @@ bayesian_knn/
         identity.py
 
     priors.py
+    model_families.py
     sampling.py
     scoring.py
     convergence.py
-    parallel.py
 
     models.py
     utils.py
@@ -136,20 +189,22 @@ Install the package and its runtime dependencies with:
 python -m pip install .
 ~~~
 
-The estimators use a mixed representation family, distance-weighted Euclidean
-k-NN, five-fold cross-validation, and automatic Monte Carlo growth by default.
+The estimators use mixed model families, a mixed representation family,
+distance-weighted Euclidean k-NN components, five-fold cross-validation, and
+automatic Monte Carlo growth by default. Set `model_family="knn"` to use only
+the k-NN family.
 For a small deterministic run:
 
 ~~~python
-from bayesian_knn import BayesianKNNClassifier
+from bayesian_model_averaging import BayesianModelAveragingClassifier
 
-model = BayesianKNNClassifier(n_estimators=20, random_state=7, n_jobs=-1)
+model = BayesianModelAveragingClassifier(n_estimators=20, random_state=7, n_jobs=-1)
 model.fit(X_train, y_train)
 probabilities = model.predict_proba(X_test)
 predictions = model.predict(X_test)
 ~~~
 
-`BayesianKNNRegressor` exposes the corresponding `fit`, `predict`, `score`, and `get_model_draws` methods. It intentionally does not expose `predict_proba`.
+`BayesianModelAveragingRegressor` exposes the corresponding `fit`, `predict`, `score`, and `get_model_draws` methods. It intentionally does not expose `predict_proba`.
 
 ## Unified logistic scale prior
 
@@ -174,7 +229,7 @@ LogisticScalePrior
 in:
 
 ~~~
-bayesian_knn/priors.py
+bayesian_model_averaging/priors.py
 ~~~
 
 Provide a method such as:
@@ -458,16 +513,18 @@ without changing the representation, sampling, scoring, or prediction modules.
 
 One draw samples:
 
-1. representation family when using the mixed mode;
-2. projection dimension within the selected representation family;
-3. projection matrix or identity transform;
-4. subset logistic parameters;
-5. subset size;
-6. subset indices;
-7. neighbourhood logistic parameters;
-8. neighbourhood size.
+1. model family when using the mixed mode;
+2. representation family for a k-NN draw when using the mixed mode;
+3. projection dimension within the selected representation family;
+4. projection matrix or identity transform;
+5. Gaussian covariance structure for a Gaussian classifier;
+6. subset logistic parameters;
+7. subset size;
+8. subset indices;
+9. neighbourhood logistic parameters and size for a k-NN draw.
 
-The transformed subset is then fitted with weighted k-NN. Every sampled parameter is retained.
+The transformed subset is then fitted with the selected estimator. Every
+sampled parameter is retained.
 
 ## Cross-validated pseudo-likelihood
 
@@ -500,6 +557,11 @@ $$
 
 Average over every validation observation. This is a cross-validated scoring utility, not a literal Bayesian likelihood.
 
+Non-k-NN classification draws use the same global class alignment and
+Dirichlet smoothing with unit predictive concentration, namely
+`(p + alpha) / (1 + C * alpha)`, because linear and Gaussian classifiers do
+not have a neighbourhood count.
+
 For regression, define a Gaussian pseudo-likelihood from validation residuals:
 
 $$
@@ -508,7 +570,7 @@ $$
 +\frac{(y_i-\hat y_i)^2}{\sigma_f^2}\right].
 $$
 
-Estimate `sigma_f^2` from the training fold only as `max(var(y_train), epsilon**2)`, where `epsilon > 0` is an estimator parameter. Average these values over validation observations. This defines a leakage-free regression scoring utility while leaving point prediction as the weighted k-NN prediction.
+Estimate `sigma_f^2` from the training fold only as `max(var(y_train), epsilon**2)`, where `epsilon > 0` is an estimator parameter. Average these values over validation observations. This defines a leakage-free regression scoring utility while leaving point prediction as the weighted average of the selected regression estimators.
 
 ## Prior probability of a complete model
 
@@ -530,8 +592,13 @@ probability
 log_probability
 ~~~
 
+Mixed-family draws additionally store the selected model family and its prior
+probability. Gaussian classification draws store the selected covariance
+structure, its probability, and the complete covariance-prior draw.
+
 The complete model record must therefore make it possible to reconstruct:
 
+- the selected model family and, where applicable, covariance structure;
 - the selected projection dimension;
 - the selected subset size;
 - the selected neighbourhood size;
@@ -543,7 +610,9 @@ The model sampler should compute:
 $$
 \log p(\theta)
 =
-\log p(d')
+\log p(f)
++ \log p(s_{\mathrm{cov}}\mid f)
++ \log p(d')
 +
 \log p(m)
 +
@@ -556,7 +625,7 @@ $$
 
 where applicable.
 
-At minimum, store the sum of the three scale-selection log probabilities:
+For a k-NN draw, store the sum of the three scale-selection log probabilities:
 
 $$
 \log p_{\mathrm{scale}}(\theta)
@@ -719,6 +788,7 @@ n_jobs=1
 
 Each sampled model stores:
 
+- model family and model-family probability;
 - representation family;
 - representation family probability;
 - projection dimension;
@@ -729,6 +799,7 @@ Each sampled model stores:
 - beta and cutoff for projection dimension;
 - beta and cutoff for subset size;
 - beta and cutoff for neighbourhood size;
+- Gaussian covariance structure and its prior probability when applicable;
 - pseudo-log-likelihood;
 - posterior weight.
 
@@ -745,9 +816,9 @@ returning a list of dictionaries.
 Implement:
 
 ~~~
-BayesianKNNClassifier
+BayesianModelAveragingClassifier
 
-BayesianKNNRegressor
+BayesianModelAveragingRegressor
 ~~~
 
 The classifier must support:

@@ -6,7 +6,11 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from bayesian_knn import BayesianKNNClassifier, BayesianKNNRegressor, LogisticScalePrior
+from bayesian_model_averaging import (
+    BayesianModelAveragingClassifier,
+    BayesianModelAveragingRegressor,
+    LogisticScalePrior,
+)
 
 
 @pytest.fixture
@@ -20,6 +24,7 @@ def data():
 
 def estimator_kwargs():
     return dict(
+        model_family="knn",
         representation="identity",
         min_subset_size=9,
         max_subset_size=18,
@@ -32,7 +37,7 @@ def estimator_kwargs():
 
 def test_classifier_predicts_and_stores_complete_draws(data):
     X, y, _ = data
-    estimator = BayesianKNNClassifier(**estimator_kwargs()).fit(X, y)
+    estimator = BayesianModelAveragingClassifier(**estimator_kwargs()).fit(X, y)
     probabilities = estimator.predict_proba(X[:5])
     assert probabilities.shape == (5, 3)
     assert np.allclose(probabilities.sum(axis=1), 1.0)
@@ -46,7 +51,7 @@ def test_classifier_predicts_and_stores_complete_draws(data):
 
 def test_regressor_predicts_and_scores(data):
     X, _, y = data
-    estimator = BayesianKNNRegressor(**estimator_kwargs()).fit(X, y)
+    estimator = BayesianModelAveragingRegressor(**estimator_kwargs()).fit(X, y)
     prediction = estimator.predict(X[:5])
     assert prediction.shape == (5,)
     assert np.all(np.isfinite(prediction))
@@ -57,7 +62,7 @@ def test_regressor_predicts_and_scores(data):
 def test_classifier_accepts_csr_inputs_for_all_representations(data, representation):
     X, y, _ = data
     X_sparse = csr_matrix(X)
-    estimator = BayesianKNNClassifier(
+    estimator = BayesianModelAveragingClassifier(
         **{
             **estimator_kwargs(),
             "representation": representation,
@@ -72,7 +77,7 @@ def test_classifier_accepts_csr_inputs_for_all_representations(data, representat
 def test_regressor_accepts_csr_inputs(data):
     X, _, y = data
     X_sparse = csr_matrix(X)
-    estimator = BayesianKNNRegressor(**estimator_kwargs()).fit(X_sparse, y)
+    estimator = BayesianModelAveragingRegressor(**estimator_kwargs()).fit(X_sparse, y)
 
     prediction = estimator.predict(X_sparse[:5])
     assert prediction.shape == (5,)
@@ -81,7 +86,7 @@ def test_regressor_accepts_csr_inputs(data):
 
 def test_mixed_representation_samples_identity_and_projection_families(data):
     X, y, _ = data
-    estimator = BayesianKNNClassifier(
+    estimator = BayesianModelAveragingClassifier(
         **{
             **estimator_kwargs(),
             "representation": "mixed",
@@ -99,10 +104,68 @@ def test_mixed_representation_samples_identity_and_projection_families(data):
     assert all(draw["projection_dimension"] == X.shape[1] for draw in identity_draws)
 
 
+def test_gaussian_family_integrates_covariance_structures(data):
+    X, y, _ = data
+    estimator = BayesianModelAveragingClassifier(
+        **{
+            **estimator_kwargs(),
+            "model_family": "gaussian",
+            "n_estimators": 20,
+        }
+    ).fit(X, y)
+    draws = estimator.get_model_draws()
+
+    assert {draw["model_family"] for draw in draws} == {"gaussian"}
+    assert {draw["gaussian_covariance_structure"] for draw in draws} == {
+        "isotropic",
+        "diagonal",
+        "full",
+    }
+    assert all(draw["gaussian_covariance_draw"] is not None for draw in draws)
+    assert all(draw["neighbor_scale_draw"] is None for draw in draws)
+
+
+@pytest.mark.parametrize("task", ["classification", "regression"])
+def test_linear_family_is_a_valid_model_family(data, task):
+    X, y_class, y_reg = data
+    estimator_class = (
+        BayesianModelAveragingClassifier
+        if task == "classification"
+        else BayesianModelAveragingRegressor
+    )
+    estimator = estimator_class(
+        **{**estimator_kwargs(), "model_family": "linear", "n_estimators": 2}
+    ).fit(X, y_class if task == "classification" else y_reg)
+
+    draws = estimator.get_model_draws()
+    assert all(draw["model_family"] == "linear" for draw in draws)
+    assert all(draw["gaussian_covariance_draw"] is None for draw in draws)
+    assert all(draw["neighbor_scale_draw"] is None for draw in draws)
+
+
+def test_mixed_model_family_averages_knn_linear_and_gaussian(data):
+    X, y, _ = data
+    estimator = BayesianModelAveragingClassifier(
+        **{
+            **estimator_kwargs(),
+            "model_family": "mixed",
+            "n_estimators": 20,
+        }
+    ).fit(X, y)
+    draws = estimator.get_model_draws()
+
+    assert {draw["model_family"] for draw in draws} == {"knn", "linear", "gaussian"}
+    assert all(draw["model_family_probability"] == pytest.approx(1 / 3) for draw in draws)
+
+
+def test_model_averaging_defaults_to_mixed_family():
+    assert BayesianModelAveragingClassifier().get_params()["model_family"] == "mixed"
+
+
 def test_parallel_and_serial_draws_are_reproducible(data):
     X, y, _ = data
-    serial = BayesianKNNClassifier(**estimator_kwargs()).fit(X, y)
-    parallel = BayesianKNNClassifier(**{**estimator_kwargs(), "n_jobs": 2}).fit(X, y)
+    serial = BayesianModelAveragingClassifier(**estimator_kwargs()).fit(X, y)
+    parallel = BayesianModelAveragingClassifier(**{**estimator_kwargs(), "n_jobs": 2}).fit(X, y)
     assert np.allclose(serial.predict_proba(X), parallel.predict_proba(X))
     assert [draw["subset_indices"].tolist() for draw in serial.get_model_draws()] == [
         draw["subset_indices"].tolist() for draw in parallel.get_model_draws()
@@ -111,7 +174,7 @@ def test_parallel_and_serial_draws_are_reproducible(data):
 
 def test_auto_convergence_respects_max_estimators(data):
     X, y, _ = data
-    estimator = BayesianKNNClassifier(
+    estimator = BayesianModelAveragingClassifier(
         **{**estimator_kwargs(), "n_estimators": "auto", "max_estimators": 2}
     ).fit(X, y)
     assert estimator.n_estimators_ == 2
@@ -120,7 +183,7 @@ def test_auto_convergence_respects_max_estimators(data):
 
 def test_estimator_is_cloneable(data):
     X, y, _ = data
-    estimator = BayesianKNNClassifier(**estimator_kwargs())
+    estimator = BayesianModelAveragingClassifier(**estimator_kwargs())
     cloned = clone(estimator)
     assert cloned.get_params()["random_state"] == 7
     cloned.fit(X, y)
@@ -128,13 +191,13 @@ def test_estimator_is_cloneable(data):
 
 def test_estimator_works_in_pipeline_and_grid_search(data):
     X, y, _ = data
-    estimator = BayesianKNNClassifier(
+    estimator = BayesianModelAveragingClassifier(
         **{**estimator_kwargs(), "n_estimators": 1, "max_subset_size": 12}
     )
     pipeline = make_pipeline(StandardScaler(), estimator)
     search = GridSearchCV(
         pipeline,
-        {"bayesianknnclassifier__max_neighbors": [1, 2]},
+        {"bayesianmodelaveragingclassifier__max_neighbors": [1, 2]},
         cv=2,
         n_jobs=1,
     )
@@ -155,14 +218,14 @@ def test_one_prior_instance_drives_all_three_scale_draws(data):
             return self.delegate.draw(values, rng)
 
     prior = CountingPrior()
-    BayesianKNNClassifier(
+    BayesianModelAveragingClassifier(
         **{**estimator_kwargs(), "scale_prior": prior, "n_jobs": 1, "n_estimators": 1}
     ).fit(X, y)
     assert prior.calls == 3
 
 
 def test_regression_scoring_uses_training_fold_variance(data):
-    from bayesian_knn.scoring import regression_cv_score
+    from bayesian_model_averaging.scoring import regression_cv_score
 
     X, _, y = data
     y = y.astype(float)

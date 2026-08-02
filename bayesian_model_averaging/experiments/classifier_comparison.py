@@ -16,7 +16,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
-from ..classifier import BayesianKNNClassifier
+from ..classifier import BayesianModelAveragingClassifier
 
 DATASET_LOADERS = {
     "iris": load_iris,
@@ -66,6 +66,7 @@ def _make_models(
     svm_parameters: dict[str, Any] | None,
 ) -> dict[str, Any]:
     bayesian_options = {
+        "model_family": "mixed",
         "representation": "mixed",
         "n_estimators": 20,
         "cv": 5,
@@ -90,7 +91,9 @@ def _make_models(
     if svm_parameters is not None:
         svm_options.update(svm_parameters)
     return {
-        "Bayesian k-NN": make_pipeline(StandardScaler(), BayesianKNNClassifier(**bayesian_options)),
+        "Bayesian model averaging": make_pipeline(
+            StandardScaler(), BayesianModelAveragingClassifier(**bayesian_options)
+        ),
         "k-NN": make_pipeline(
             StandardScaler(),
             KNeighborsClassifier(n_neighbors=n_neighbors, weights="distance"),
@@ -200,25 +203,6 @@ def run_comparison_suite(
     }
 
 
-def format_comparison_table(results: dict[str, DatasetComparisonResult]) -> str:
-    """Format comparison results as a compact Markdown table."""
-
-    lines = [
-        "| Dataset | Classifier | Accuracy (mean ± std) | "
-        "Balanced accuracy (mean ± std) | Macro-F1 (mean ± std) |",
-        "| --- | --- | ---: | ---: | ---: |",
-    ]
-    for dataset, result in results.items():
-        for classifier, metrics in result.scores.items():
-            stds = result.score_stds[classifier]
-            formatted = [
-                f"{metrics[metric]:.3f} ± {stds[metric]:.3f}"
-                for metric in ("accuracy", "balanced_accuracy", "macro_f1")
-            ]
-            lines.append(f"| {dataset} | {classifier} | {' | '.join(formatted)} |")
-    return "\n".join(lines)
-
-
 def comparison_results_dataframe(results: dict[str, DatasetComparisonResult]) -> Any:
     """Return repeated comparison results as a pandas DataFrame.
 
@@ -305,7 +289,7 @@ def plot_comparison_results(
     ax.set_xticks(positions, datasets)
     ax.set_ylim(0, max(1.05, 1.08 * upper_bound))
     ax.set_ylabel(metric.replace("_", " ").title())
-    ax.set_title("Bayesian k-NN versus standard classifiers")
+    ax.set_title("Bayesian model averaging versus standard classifiers")
     ax.grid(axis="y", alpha=0.25)
     ax.legend()
     fig.tight_layout()

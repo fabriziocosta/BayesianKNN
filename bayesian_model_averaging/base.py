@@ -12,7 +12,12 @@ from sklearn.utils.validation import check_is_fitted
 
 from .convergence import compare_predictions, convergence_difference
 from .models import ModelDraw
-from .priors import LogisticScalePrior, make_scale_prior
+from .priors import (
+    GaussianCovariancePrior,
+    LogisticScalePrior,
+    make_gaussian_covariance_prior,
+    make_scale_prior,
+)
 from .sampling import (
     feasible_subset_sizes,
     fit_prepared_model,
@@ -35,13 +40,15 @@ def _predict_single(model: ModelDraw, X: Any, task: str, classes: np.ndarray | N
     return np.asarray(model.estimator.predict(transformed), dtype=float)
 
 
-class BayesianKNNBase(BaseEstimator):
+class BayesianModelAveragingBase(BaseEstimator):
     """Common Monte Carlo fitting and prediction machinery."""
 
     def __init__(
         self,
         representation: str = "mixed",
+        model_family: str = "mixed",
         scale_prior: LogisticScalePrior | None = None,
+        gaussian_covariance_prior: GaussianCovariancePrior | None = None,
         min_subset_size: int | None = None,
         max_subset_size: int | None = None,
         max_neighbors: int | None = None,
@@ -59,7 +66,9 @@ class BayesianKNNBase(BaseEstimator):
         random_state: Any = None,
     ) -> None:
         self.representation = representation
+        self.model_family = model_family
         self.scale_prior = scale_prior
+        self.gaussian_covariance_prior = gaussian_covariance_prior
         self.min_subset_size = min_subset_size
         self.max_subset_size = max_subset_size
         self.max_neighbors = max_neighbors
@@ -81,6 +90,8 @@ class BayesianKNNBase(BaseEstimator):
             raise ValueError(
                 "representation must be 'mixed', 'gaussian', 'sparse', or 'identity'"
             )
+        if self.model_family not in {"knn", "linear", "gaussian", "mixed"}:
+            raise ValueError("model_family must be 'knn', 'linear', 'gaussian', or 'mixed'")
         if self.weights not in {"uniform", "distance"}:
             raise ValueError("weights must be 'uniform' or 'distance'")
         if self.n_estimators != "auto" and (
@@ -117,7 +128,7 @@ class BayesianKNNBase(BaseEstimator):
             ):
                 raise ValueError(f"{name} must be a positive integer")
 
-    def _fit_task(self, X: Any, y: Any, task: str) -> BayesianKNNBase:
+    def _fit_task(self, X: Any, y: Any, task: str) -> BayesianModelAveragingBase:
         self._validate_parameters()
         X, y = check_X_y(X, y, accept_sparse=True, ensure_2d=True, y_numeric=task == "regression")
         if task == "regression":
@@ -143,6 +154,9 @@ class BayesianKNNBase(BaseEstimator):
             raise ValueError("no admissible subset size exists for this dataset and CV setup")
 
         self.scale_prior_ = make_scale_prior(self.scale_prior)
+        self.gaussian_covariance_prior_ = make_gaussian_covariance_prior(
+            self.gaussian_covariance_prior
+        )
         self._base_seed = base_seed(self.random_state)
         self._task = task
         self._X_fit_shape = X.shape
@@ -204,6 +218,8 @@ class BayesianKNNBase(BaseEstimator):
             X,
             y,
             task=self._task,
+            model_family=self.model_family,
+            gaussian_covariance_prior=self.gaussian_covariance_prior_,
             representation=self.representation,
             scale_prior=self.scale_prior_,
             min_subset_size=(

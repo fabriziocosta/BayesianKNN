@@ -1,4 +1,4 @@
-"""Feature-space representations used by Bayesian k-NN."""
+"""Feature-space representations used by Bayesian model averaging."""
 
 from .base import BaseRepresentation, make_representation
 

@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from bayesian_knn import LogisticScalePrior
-from bayesian_knn.priors import make_scale_prior
+from bayesian_model_averaging import GaussianCovariancePrior, LogisticScalePrior
+from bayesian_model_averaging.priors import make_scale_prior
 
 
 def test_logistic_scale_prior_is_normalized_and_monotone():
@@ -63,3 +63,25 @@ def test_empirical_frequency_matches_the_beta_cutoff_marginal():
 def test_scale_prior_accepts_a_logistic_configuration_mapping():
     prior = make_scale_prior({"family": "logistic", "beta_shape": 2.0, "beta_scale": 1.0})
     assert isinstance(prior, LogisticScalePrior)
+
+
+def test_gaussian_covariance_prior_is_normalized_monotone_and_reproducible():
+    prior = GaussianCovariancePrior()
+    left = prior.draw(4, np.random.default_rng(31))
+    right = prior.draw(4, np.random.default_rng(31))
+    probabilities = np.asarray(left.probabilities)
+
+    assert left == right
+    assert left.value in {"isotropic", "diagonal", "full"}
+    assert np.isclose(probabilities.sum(), 1.0)
+    assert np.all(probabilities > 0)
+    assert np.all(np.diff(probabilities) < 0)
+    assert np.isclose(left.log_probability, np.log(left.probability))
+
+
+def test_gaussian_covariance_prior_simplicity_controls_complexity_penalty():
+    simple = GaussianCovariancePrior(simplicity=0.5).draw(5, np.random.default_rng(1))
+    strong = GaussianCovariancePrior(simplicity=3.0).draw(5, np.random.default_rng(1))
+
+    assert strong.probabilities[0] > simple.probabilities[0]
+    assert strong.probabilities[-1] < simple.probabilities[-1]

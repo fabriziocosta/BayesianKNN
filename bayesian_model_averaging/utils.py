@@ -17,8 +17,8 @@ def base_seed(random_state: Any) -> int:
         return int(random_state)
     if isinstance(random_state, np.random.Generator):
         return int(random_state.integers(0, np.iinfo(np.uint32).max, dtype=np.uint32))
-    legacy = check_random_state(random_state)
-    return int(legacy.randint(0, np.iinfo(np.uint32).max, dtype=np.uint32))
+    random_generator = check_random_state(random_state)
+    return int(random_generator.randint(0, np.iinfo(np.uint32).max, dtype=np.uint32))
 
 
 def child_seed(seed: int, index: int) -> int:

@@ -19,7 +19,7 @@ from sklearn.datasets import (
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 
-from ..classifier import BayesianKNNClassifier
+from ..classifier import BayesianModelAveragingClassifier
 
 DEFAULT_MODEL_PARAMETERS: dict[str, Any] = {
     "n_estimators": "auto",
@@ -72,7 +72,7 @@ class Classification2DResult:
     X_test: np.ndarray
     y_train: np.ndarray
     y_test: np.ndarray
-    model: BayesianKNNClassifier
+    model: BayesianModelAveragingClassifier
     y_pred: np.ndarray
     test_accuracy: float
     model_weights: np.ndarray
@@ -410,7 +410,7 @@ def run_2d_classification_experiment(
     model_options = dict(DEFAULT_MODEL_PARAMETERS)
     if model_parameters is not None:
         model_options.update(model_parameters)
-    model = BayesianKNNClassifier(**model_options)
+    model = BayesianModelAveragingClassifier(**model_options)
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
     model_weights = np.asarray(
@@ -552,7 +552,7 @@ def plot_probability_heatmap(
         ax.set_ylabel("Feature 2")
         ax.legend(loc="upper right")
     fig.suptitle(
-        f"Bayesian Monte Carlo k-NN on {result.dataset}\n"
+        f"Bayesian model averaging on {result.dataset}\n"
         f"{result.model.n_estimators_} estimators, test accuracy = {result.test_accuracy:.3f}"
     )
     fig.tight_layout(rect=(0, 0, 1, 0.94))

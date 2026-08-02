@@ -1,4 +1,4 @@
-"""Bayesian Monte Carlo k-NN regressor."""
+"""Bayesian model-averaging regressor."""
 
 from __future__ import annotations
 
@@ -7,15 +7,15 @@ from typing import Any
 from sklearn.base import RegressorMixin
 from sklearn.metrics import r2_score
 
-from .base import BayesianKNNBase
+from .base import BayesianModelAveragingBase
 
 
-class BayesianKNNRegressor(RegressorMixin, BayesianKNNBase):
-    """Regressor that averages weighted k-NN models over sampled scales."""
+class BayesianModelAveragingRegressor(RegressorMixin, BayesianModelAveragingBase):
+    """Regressor that averages sampled predictive models over CV scores."""
 
     _estimator_type = "regressor"
 
-    def fit(self, X: Any, y: Any) -> BayesianKNNRegressor:
+    def fit(self, X: Any, y: Any) -> BayesianModelAveragingRegressor:
         self._fit_task(X, y, "regression")
         return self
 

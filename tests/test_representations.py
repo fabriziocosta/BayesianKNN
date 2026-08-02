@@ -1,6 +1,6 @@
 import numpy as np
 
-from bayesian_knn.representation import make_representation
+from bayesian_model_averaging.representation import make_representation
 
 
 def test_representations_have_expected_shapes_and_identity_is_dimension_safe():

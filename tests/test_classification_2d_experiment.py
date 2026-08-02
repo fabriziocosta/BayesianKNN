@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from bayesian_knn.experiments.classification_2d import (
+from bayesian_model_averaging.experiments.classification_2d import (
     make_2d_dataset,
     plot_probability_heatmap,
     run_2d_classification_experiment,

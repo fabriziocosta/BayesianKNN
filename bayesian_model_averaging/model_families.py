@@ -5,8 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 import numpy as np
-from scipy.special import logsumexp
 from scipy.sparse import issparse
+from scipy.special import logsumexp
 from sklearn.linear_model import BayesianRidge, LogisticRegression, Ridge
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 
@@ -18,7 +18,7 @@ def _dense(X: Any) -> np.ndarray:
 
 
 class GaussianClassifier:
-    """Generative Gaussian classifier with a shared covariance structure."""
+    """Generative Gaussian classifier with a selected covariance structure."""
 
     def __init__(self, covariance_structure: str, reg_covar: float = 1e-6) -> None:
         self.covariance_structure = covariance_structure

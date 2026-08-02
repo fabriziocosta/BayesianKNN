@@ -3,13 +3,13 @@ requires = ["hatchling>=1.25"]
 build-backend = "hatchling.build"
 
 [project]
-name = "bayesian-knn"
+name = "bayesian-model-averaging"
 version = "0.1.0"
-description = "Bayesian Monte Carlo model averaging for k-nearest-neighbours classifiers and regressors"
+description = "Bayesian model averaging for k-nearest-neighbours, linear, and Gaussian predictors"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
-authors = [{ name = "BayesianKNN contributors" }]
+authors = [{ name = "BayesianModelAveraging contributors" }]
 dependencies = [
     "joblib>=1.2",
     "numpy>=1.23.5",
@@ -28,13 +28,13 @@ notebook = [
     "pandas>=1.5",
 ]
 dev = [
-    "bayesian-knn[test]",
-    "bayesian-knn[notebook]",
+    "bayesian-model-averaging[test]",
+    "bayesian-model-averaging[notebook]",
     "ruff>=0.6",
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["bayesian_knn"]
+packages = ["bayesian_model_averaging"]
 
 [tool.pytest.ini_options]
 addopts = "-ra"

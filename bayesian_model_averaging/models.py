@@ -62,6 +62,9 @@ class ModelDraw:
         self.log_importance_weight = self.cv_log_pseudo_likelihood
 
     def to_dict(self) -> dict[str, Any]:
+        projection_draw = self.projection_scale_draw
+        subset_draw = self.subset_scale_draw
+        neighbor_draw = self.neighbor_scale_draw
         return {
             "model_family": self.model_family,
             "model_family_probability": self.model_family_probability,
@@ -77,17 +80,17 @@ class ModelDraw:
             "subset_size": self.subset_size,
             "subset_indices": self.subset_indices.copy(),
             "neighborhood_size": self.neighborhood_size,
-            "neighbourhood_size": self.neighborhood_size,
-            "projection_scale_draw": _draw_dict(self.projection_scale_draw),
-            "subset_scale_draw": _draw_dict(self.subset_scale_draw),
-            "neighbor_scale_draw": _draw_dict(self.neighbor_scale_draw),
-            "neighbour_scale_draw": _draw_dict(self.neighbor_scale_draw),
-            "projection_beta": self.projection_scale_draw.beta,
-            "projection_cutoff": self.projection_scale_draw.cutoff,
-            "subset_beta": self.subset_scale_draw.beta,
-            "subset_cutoff": self.subset_scale_draw.cutoff,
-            "neighbor_beta": self.neighbor_scale_draw.beta,
-            "neighbor_cutoff": self.neighbor_scale_draw.cutoff,
+            "projection_scale_draw": (
+                None if projection_draw is None else _draw_dict(projection_draw)
+            ),
+            "subset_scale_draw": None if subset_draw is None else _draw_dict(subset_draw),
+            "neighbor_scale_draw": None if neighbor_draw is None else _draw_dict(neighbor_draw),
+            "projection_beta": None if projection_draw is None else projection_draw.beta,
+            "projection_cutoff": None if projection_draw is None else projection_draw.cutoff,
+            "subset_beta": None if subset_draw is None else subset_draw.beta,
+            "subset_cutoff": None if subset_draw is None else subset_draw.cutoff,
+            "neighbor_beta": None if neighbor_draw is None else neighbor_draw.beta,
+            "neighbor_cutoff": None if neighbor_draw is None else neighbor_draw.cutoff,
             "log_prior": self.log_prior,
             "log_proposal": self.log_proposal,
             "cv_log_pseudo_likelihood": self.cv_log_pseudo_likelihood,

@@ -1,9 +1,8 @@
 import numpy as np
 import pytest
 
-from bayesian_knn.experiments.classifier_comparison import (
+from bayesian_model_averaging.experiments.classifier_comparison import (
     comparison_results_dataframe,
-    format_comparison_table,
     load_standard_dataset,
     plot_comparison_results,
     run_comparison_suite,
@@ -38,7 +37,7 @@ def test_dataset_comparison_returns_all_classifiers_and_metrics():
         bayesian_parameters=parameters,
         random_forest_parameters={"n_estimators": 5, "n_jobs": 1},
     )
-    assert set(result.scores) == {"Bayesian k-NN", "k-NN", "Random forest", "SVM"}
+    assert set(result.scores) == {"Bayesian model averaging", "k-NN", "Random forest", "SVM"}
     for metrics in result.scores.values():
         assert set(metrics) == {"accuracy", "balanced_accuracy", "macro_f1"}
         assert all(0.0 <= value <= 1.0 for value in metrics.values())
@@ -53,7 +52,6 @@ def test_dataset_comparison_returns_all_classifiers_and_metrics():
         bayesian_parameters=parameters,
         random_forest_parameters={"n_estimators": 5, "n_jobs": 1},
     )
-    assert "| Dataset | Classifier |" in format_comparison_table(suite)
     pandas = pytest.importorskip("pandas")
     frame = comparison_results_dataframe(suite)
     assert isinstance(frame, pandas.DataFrame)

@@ -1,4 +1,4 @@
-"""Bayesian Monte Carlo k-NN classifier."""
+"""Bayesian model-averaging classifier."""
 
 from __future__ import annotations
 
@@ -7,15 +7,15 @@ from typing import Any
 from sklearn.base import ClassifierMixin
 from sklearn.metrics import accuracy_score
 
-from .base import BayesianKNNBase
+from .base import BayesianModelAveragingBase
 
 
-class BayesianKNNClassifier(ClassifierMixin, BayesianKNNBase):
-    """Classifier that averages weighted k-NN models over sampled scales."""
+class BayesianModelAveragingClassifier(ClassifierMixin, BayesianModelAveragingBase):
+    """Classifier that averages sampled predictive models over CV scores."""
 
     _estimator_type = "classifier"
 
-    def fit(self, X: Any, y: Any) -> BayesianKNNClassifier:
+    def fit(self, X: Any, y: Any) -> BayesianModelAveragingClassifier:
         self._fit_task(X, y, "classification")
         return self
 
