@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator, Mapping, Sequence
+from time import perf_counter
 from typing import Any
 
 from bayesian_model_averaging.experiments.classification_2d import (
@@ -24,13 +25,16 @@ def run_and_report(
     """Run datasets, print diagnostics, and yield each result immediately."""
 
     for dataset in datasets:
+        started = perf_counter()
         result = run_2d_classification_experiment(
             dataset,
             dataset_parameters=dict(dataset_parameters),
             **dict(split_parameters),
             model_parameters=dict(model_parameters),
         )
+        runtime_seconds = perf_counter() - started
         print(f"dataset: {result.dataset}")
+        print(f"runtime: {runtime_seconds:.2f}s")
         print(f"test accuracy: {result.test_accuracy:.3f}")
         print(format_error_comparison(result))
         print(f"estimators used: {result.model.n_estimators_}")
