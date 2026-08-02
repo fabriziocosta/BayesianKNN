@@ -19,7 +19,6 @@ from sklearn.datasets import (
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 
-from ..adapters import FamilyRegistration, KNNAdapter
 from ..classifier import BayesianModelAveragingClassifier
 
 DEFAULT_MODEL_PARAMETERS: dict[str, Any] = {
@@ -29,7 +28,6 @@ DEFAULT_MODEL_PARAMETERS: dict[str, Any] = {
     "convergence_metric": "median",
     "convergence_size": 256,
     "cv": 5,
-    "family_registry": [FamilyRegistration(KNNAdapter(), 1.0)],
     "n_jobs": -1,
     "random_state": 12,
 }
