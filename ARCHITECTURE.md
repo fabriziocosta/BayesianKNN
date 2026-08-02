@@ -140,8 +140,9 @@ An adapter owns all family-specific parameter logic. `sample_parameters` gets
 a `SamplingContext` containing task, transformed feature count, class count,
 subset size, minimum CV training-fold size, classes, and the shared scale
 prior. For classification it also contains the minimum per-class CV training
-size, which lets class-conditional adapters enforce valid configurations. It
-must return one `ParameterDraw` containing:
+size and minimum distinct per-class training size, which lets class-conditional
+adapters enforce valid configurations. It must return one `ParameterDraw`
+containing:
 
 ```python
 ParameterDraw(

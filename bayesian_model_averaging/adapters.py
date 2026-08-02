@@ -42,6 +42,7 @@ class SamplingContext:
     classes: np.ndarray | None
     scale_prior: Any
     min_class_train_size: int | None = None
+    min_class_distinct_train_size: int | None = None
 
 
 @runtime_checkable
@@ -548,7 +549,15 @@ class GaussianMixtureAdapter(BaseEstimator):
             min_class_train_size = max(1, context.min_train_size // context.n_classes)
         else:
             min_class_train_size = int(context.min_class_train_size)
-        valid_max_components = min(max_components, min_class_train_size)
+        if context.min_class_distinct_train_size is None:
+            min_class_distinct_train_size = min_class_train_size
+        else:
+            min_class_distinct_train_size = int(context.min_class_distinct_train_size)
+        valid_max_components = min(
+            max_components,
+            min_class_train_size,
+            min_class_distinct_train_size,
+        )
         if valid_max_components < 1:
             raise ValueError("no valid Gaussian-mixture component count")
 

@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+from scipy.sparse import issparse
 from scipy.special import gammaln, logsumexp
 from sklearn.base import clone
 from sklearn.model_selection import KFold, StratifiedKFold
@@ -235,6 +236,7 @@ def prepare_model(
     splits = list(cv_splitter.split(X_subset, y_subset))
     n_train_min = min(len(train_indices) for train_indices, _ in splits)
     min_class_train_size = None
+    min_class_distinct_train_size = None
     if task == "classification":
         subset_classes = np.unique(y_subset)
         min_class_train_size = min(
@@ -242,6 +244,15 @@ def prepare_model(
             for train_indices, _ in splits
             for label in subset_classes
         )
+        distinct_counts = []
+        for train_indices, _ in splits:
+            X_train = X_subset[train_indices]
+            if issparse(X_train):
+                X_train = X_train.toarray()
+            for label in subset_classes:
+                class_rows = np.asarray(X_train)[y_subset[train_indices] == label]
+                distinct_counts.append(len(np.unique(class_rows, axis=0)))
+        min_class_distinct_train_size = min(distinct_counts)
     context = SamplingContext(
         task=task,
         n_features=int(transformed.shape[1]),
@@ -252,6 +263,7 @@ def prepare_model(
         classes=classes,
         scale_prior=scale_prior,
         min_class_train_size=min_class_train_size,
+        min_class_distinct_train_size=min_class_distinct_train_size,
     )
     parameter_prior = family_adapter.sample_parameters(context, rng)
     if not np.isfinite(parameter_prior.log_probability):
