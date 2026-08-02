@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from bayesian_knn import LogisticScalePrior
+from bayesian_knn.priors import make_scale_prior
 
 
 def test_logistic_scale_prior_is_normalized_and_monotone():
@@ -45,3 +46,20 @@ def test_smaller_values_are_sampled_more_frequently():
     for _ in range(1500):
         counts[prior.draw([1, 2, 3, 4], rng).index] += 1
     assert counts[0] > counts[-1]
+
+
+def test_empirical_frequency_matches_the_beta_cutoff_marginal():
+    prior = LogisticScalePrior()
+    rng = np.random.default_rng(22)
+    counts = np.zeros(3, dtype=float)
+    expected = np.zeros(3, dtype=float)
+    for _ in range(4000):
+        draw = prior.draw([1, 2, 3], rng)
+        counts[draw.index] += 1
+        expected += np.asarray(draw.probabilities)
+    assert np.allclose(counts / counts.sum(), expected / expected.sum(), atol=0.025)
+
+
+def test_scale_prior_accepts_a_logistic_configuration_mapping():
+    prior = make_scale_prior({"family": "logistic", "beta_shape": 2.0, "beta_scale": 1.0})
+    assert isinstance(prior, LogisticScalePrior)

@@ -33,3 +33,6 @@ class SparseProjection(BaseRepresentation):
             "n_components": self.n_components,
             "components": components.copy(),
         }
+
+    def sample_parameters(self, random_state: int) -> dict[str, Any]:
+        return {"n_components": self.n_components, "random_state": int(random_state)}

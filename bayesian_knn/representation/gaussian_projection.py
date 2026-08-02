@@ -32,3 +32,6 @@ class GaussianProjection(BaseRepresentation):
             "n_components": self.n_components,
             "components": self._projection.components_.copy(),
         }
+
+    def sample_parameters(self, random_state: int) -> dict[str, Any]:
+        return {"n_components": self.n_components, "random_state": int(random_state)}

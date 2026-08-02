@@ -23,6 +23,11 @@ class BaseRepresentation(ABC):
     def parameters(self) -> dict[str, Any]:
         raise NotImplementedError
 
+    @abstractmethod
+    def sample_parameters(self, random_state: int) -> dict[str, Any]:
+        """Return the representation parameters used for a Monte Carlo draw."""
+        raise NotImplementedError
+
     def fit_transform(self, X: Any) -> Any:
         return self.fit(X).transform(X)
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 
 import numpy as np
@@ -75,3 +75,21 @@ class LogisticScalePrior:
             log_probability=float(np.log(probability)),
             probabilities=tuple(float(probability_) for probability_ in probabilities),
         )
+
+
+def make_scale_prior(configuration: object | None) -> LogisticScalePrior:
+    """Normalize an estimator prior object or logistic configuration mapping."""
+
+    if configuration is None:
+        return LogisticScalePrior()
+    if isinstance(configuration, LogisticScalePrior):
+        return configuration
+    if isinstance(configuration, Mapping):
+        values = dict(configuration)
+        family = values.pop("family", values.pop("name", "logistic"))
+        if family != "logistic":
+            raise ValueError("only the logistic scale prior is implemented")
+        return LogisticScalePrior(**values)
+    if callable(getattr(configuration, "draw", None)):
+        return configuration  # type: ignore[return-value]
+    raise TypeError("scale_prior must be a prior object or a logistic configuration mapping")

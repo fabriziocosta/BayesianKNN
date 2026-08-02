@@ -24,6 +24,32 @@ class SubsetSample:
     log_probability: float
 
 
+@dataclass(frozen=True)
+class PreparedModel:
+    """A sampled model before scoring and final fitting."""
+
+    task: str
+    representation_family: str
+    projection_dimension: int
+    projection_parameters: dict[str, Any]
+    representation_object: Any
+    subset_size: int
+    subset_indices: np.ndarray
+    subset_log_probability: float
+    neighborhood_size: int
+    projection_scale_draw: Any
+    subset_scale_draw: Any
+    neighbor_scale_draw: Any
+    X_subset: Any
+    y_subset: np.ndarray
+    splits: list[tuple[np.ndarray, np.ndarray]]
+    weights: str
+    metric: str
+    alpha: float
+    epsilon: float
+    classes: np.ndarray | None
+
+
 def n_splits_for_cv(cv: int | Any) -> int:
     if isinstance(cv, (int, np.integer)):
         if int(cv) < 2:
@@ -131,7 +157,7 @@ def _sample_class_counts(
     return counts, total_log_count
 
 
-def build_model(
+def prepare_model(
     X: Any,
     y: np.ndarray,
     *,
@@ -148,12 +174,13 @@ def build_model(
     epsilon: float,
     seed: int,
     classes: np.ndarray | None,
-) -> ModelDraw:
+) -> PreparedModel:
     rng = np.random.default_rng(seed)
     n_features = int(X.shape[1])
     projection_values = [n_features] if representation == "identity" else range(1, n_features + 1)
     projection_draw = scale_prior.draw(projection_values, rng)
     projection = make_representation(representation, projection_draw.value, seed)
+    sampled_projection_parameters = projection.sample_parameters(seed)
     transformed = projection.fit_transform(X)
 
     n_splits = n_splits_for_cv(cv)
@@ -173,40 +200,103 @@ def build_model(
         raise ValueError("max_neighbors leaves no valid neighbourhood size")
     neighbor_draw = scale_prior.draw(range(1, k_max + 1), rng)
 
-    if task == "classification":
-        cv_score = classification_cv_score(
-            X_subset, y_subset, splits, neighbor_draw.value, weights, metric, alpha, classes
-        )
-        estimator = KNeighborsClassifier(
-            n_neighbors=neighbor_draw.value, weights=weights, metric=metric, n_jobs=1
-        )
-    else:
-        cv_score = regression_cv_score(
-            X_subset, y_subset, splits, neighbor_draw.value, weights, metric, epsilon
-        )
-        estimator = KNeighborsRegressor(
-            n_neighbors=neighbor_draw.value, weights=weights, metric=metric, n_jobs=1
-        )
-    estimator.fit(X_subset, y_subset)
-    log_prior = (
-        projection_draw.log_probability
-        + subset_draw.log_probability
-        + neighbor_draw.log_probability
-        + subset.log_probability
-    )
-    return ModelDraw(
+    return PreparedModel(
+        task=task,
         representation_family=representation,
         projection_dimension=projection_draw.value,
-        projection_parameters=projection.parameters(),
+        projection_parameters={**sampled_projection_parameters, **projection.parameters()},
         representation_object=projection,
         subset_size=subset_draw.value,
         subset_indices=subset.indices,
+        subset_log_probability=subset.log_probability,
         neighborhood_size=neighbor_draw.value,
         projection_scale_draw=projection_draw,
         subset_scale_draw=subset_draw,
         neighbor_scale_draw=neighbor_draw,
+        X_subset=X_subset,
+        y_subset=y_subset,
+        splits=splits,
+        weights=weights,
+        metric=metric,
+        alpha=alpha,
+        epsilon=epsilon,
+        classes=classes,
+    )
+
+
+def score_prepared_model(prepared: PreparedModel) -> float:
+    """Score one prepared model; this phase is independently parallelizable."""
+
+    if prepared.task == "classification":
+        return classification_cv_score(
+            prepared.X_subset,
+            prepared.y_subset,
+            prepared.splits,
+            prepared.neighborhood_size,
+            prepared.weights,
+            prepared.metric,
+            prepared.alpha,
+            prepared.classes,
+        )
+    return regression_cv_score(
+        prepared.X_subset,
+        prepared.y_subset,
+        prepared.splits,
+        prepared.neighborhood_size,
+        prepared.weights,
+        prepared.metric,
+        prepared.epsilon,
+    )
+
+
+def fit_prepared_model(prepared: PreparedModel, cv_score: float) -> ModelDraw:
+    """Fit one final model after its CV score has been computed."""
+
+    if prepared.task == "classification":
+        estimator = KNeighborsClassifier(
+            n_neighbors=prepared.neighborhood_size,
+            weights=prepared.weights,
+            metric=prepared.metric,
+            n_jobs=1,
+        )
+    else:
+        estimator = KNeighborsRegressor(
+            n_neighbors=prepared.neighborhood_size,
+            weights=prepared.weights,
+            metric=prepared.metric,
+            n_jobs=1,
+        )
+    estimator.fit(prepared.X_subset, prepared.y_subset)
+    log_prior = (
+        prepared.projection_scale_draw.log_probability
+        + prepared.subset_scale_draw.log_probability
+        + prepared.neighbor_scale_draw.log_probability
+        + prepared.subset_log_probability
+    )
+    return ModelDraw(
+        representation_family=prepared.representation_family,
+        projection_dimension=prepared.projection_dimension,
+        projection_parameters=prepared.projection_parameters,
+        representation_object=prepared.representation_object,
+        subset_size=prepared.subset_size,
+        subset_indices=prepared.subset_indices,
+        neighborhood_size=prepared.neighborhood_size,
+        projection_scale_draw=prepared.projection_scale_draw,
+        subset_scale_draw=prepared.subset_scale_draw,
+        neighbor_scale_draw=prepared.neighbor_scale_draw,
         log_prior=float(log_prior),
         log_proposal=float(log_prior),
         cv_log_pseudo_likelihood=float(cv_score),
         estimator=estimator,
     )
+
+
+def build_model(
+    X: Any,
+    y: np.ndarray,
+    **kwargs: Any,
+) -> ModelDraw:
+    """Build one model sequentially for callers that do not need staged parallelism."""
+
+    prepared = prepare_model(X, y, **kwargs)
+    return fit_prepared_model(prepared, score_prepared_model(prepared))

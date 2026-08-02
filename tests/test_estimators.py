@@ -5,7 +5,7 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 
-from bayesian_knn import BayesianKNNClassifier, BayesianKNNRegressor
+from bayesian_knn import BayesianKNNClassifier, BayesianKNNRegressor, LogisticScalePrior
 
 
 @pytest.fixture
@@ -93,3 +93,48 @@ def test_estimator_works_in_pipeline_and_grid_search(data):
     )
     search.fit(X, y)
     assert search.best_estimator_.predict(X[:2]).shape == (2,)
+
+
+def test_one_prior_instance_drives_all_three_scale_draws(data):
+    X, y, _ = data
+
+    class CountingPrior:
+        def __init__(self):
+            self.delegate = LogisticScalePrior()
+            self.calls = 0
+
+        def draw(self, values, rng):
+            self.calls += 1
+            return self.delegate.draw(values, rng)
+
+    prior = CountingPrior()
+    BayesianKNNClassifier(
+        **{**estimator_kwargs(), "scale_prior": prior, "n_jobs": 1, "n_estimators": 1}
+    ).fit(X, y)
+    assert prior.calls == 3
+
+
+def test_regression_scoring_uses_training_fold_variance(data):
+    from bayesian_knn.scoring import regression_cv_score
+
+    X, _, y = data
+    y = y.astype(float)
+    train = np.array([0, 1, 2, 3])
+    validation = np.array([4, 5])
+    score = regression_cv_score(
+        X,
+        y,
+        [(train, validation)],
+        n_neighbors=1,
+        weights="uniform",
+        metric="euclidean",
+        epsilon=1e-8,
+    )
+    from sklearn.neighbors import KNeighborsRegressor
+
+    estimator = KNeighborsRegressor(n_neighbors=1, weights="uniform", metric="euclidean")
+    estimator.fit(X[train], y[train])
+    residuals = y[validation] - estimator.predict(X[validation])
+    sigma2 = np.var(y[train])
+    expected = np.mean(-0.5 * (np.log(2 * np.pi * sigma2) + residuals**2 / sigma2))
+    assert np.isclose(score, expected)

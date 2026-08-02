@@ -12,8 +12,14 @@ from sklearn.utils.validation import check_is_fitted
 
 from .convergence import compare_predictions, convergence_difference
 from .models import ModelDraw
-from .priors import LogisticScalePrior
-from .sampling import build_model, feasible_subset_sizes, n_splits_for_cv
+from .priors import LogisticScalePrior, make_scale_prior
+from .sampling import (
+    feasible_subset_sizes,
+    fit_prepared_model,
+    n_splits_for_cv,
+    prepare_model,
+    score_prepared_model,
+)
 from .utils import base_seed, child_seed, stable_softmax
 
 
@@ -134,7 +140,7 @@ class BayesianKNNBase(BaseEstimator):
         if not feasible:
             raise ValueError("no admissible subset size exists for this dataset and CV setup")
 
-        self.scale_prior_ = self.scale_prior or LogisticScalePrior()
+        self.scale_prior_ = make_scale_prior(self.scale_prior)
         self._base_seed = base_seed(self.random_state)
         self._task = task
         self._X_fit_shape = X.shape
@@ -158,8 +164,15 @@ class BayesianKNNBase(BaseEstimator):
         while True:
             start = len(self._models)
             seeds = [child_seed(self._base_seed, index) for index in range(start, target)]
+            prepared_models = Parallel(n_jobs=self.n_jobs)(
+                delayed(self._prepare_model)(X, y, seed) for seed in seeds
+            )
+            scores = Parallel(n_jobs=self.n_jobs)(
+                delayed(score_prepared_model)(prepared) for prepared in prepared_models
+            )
             new_models = Parallel(n_jobs=self.n_jobs)(
-                delayed(self._build_model)(X, y, seed) for seed in seeds
+                delayed(fit_prepared_model)(prepared, score)
+                for prepared, score in zip(prepared_models, scores)
             )
             self._models.extend(new_models)
             self._update_weights()
@@ -183,8 +196,8 @@ class BayesianKNNBase(BaseEstimator):
         self.n_estimators_ = len(self._models)
         return self
 
-    def _build_model(self, X: Any, y: np.ndarray, seed: int) -> ModelDraw:
-        return build_model(
+    def _prepare_model(self, X: Any, y: np.ndarray, seed: int) -> Any:
+        return prepare_model(
             X,
             y,
             task=self._task,

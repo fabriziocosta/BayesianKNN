@@ -23,3 +23,6 @@ class IdentityRepresentation(BaseRepresentation):
 
     def parameters(self) -> dict[str, Any]:
         return {"n_components": self.n_features_in_}
+
+    def sample_parameters(self, random_state: int) -> dict[str, Any]:
+        return {"random_state": int(random_state)}
