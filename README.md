@@ -20,10 +20,11 @@ Available estimators:
 - `BayesianModelAveragingClassifier`, including `predict_proba()`
 - `BayesianModelAveragingRegressor`
 
-The default runtime registry averages k-NN, gated linear-mixture, Gaussian-mixture, MLP, and decision-tree adapters
-with uniform family prior weights. New scikit-learn estimator families can be
-registered explicitly with a prior weight and an adapter-owned hyperparameter
-prior without changing the averaging engine.
+The default runtime registry averages k-NN, gated linear-mixture,
+Gaussian-mixture, MLP, and decision-tree adapters with uniform family prior
+weights. New scikit-learn estimator families can be registered explicitly with
+a prior weight and an adapter-owned hyperparameter prior without changing the
+averaging engine.
 
 The decision-tree adapter uses priors over tree depth, split and leaf sizes,
 criterion, and splitter.
@@ -32,9 +33,11 @@ The default Gaussian-mixture adapter fits one mixture per class, samples up to
 30 components, prefers simpler mixtures, and samples isotropic, diagonal, or
 full covariance structures.
 
-`LinearMixtureAdapter` is available as an opt-in gated mixture of logistic or
-ridge linear experts. Its learned linear softmax gate makes the expert weights
-input-dependent while retaining linear experts.
+`LinearMixtureAdapter` is the default linear family: a gated mixture of
+logistic or ridge linear experts. Its learned linear softmax gate makes the
+expert weights input-dependent while retaining linear experts. The simpler
+`LinearAdapter` and single-Gaussian `GaussianAdapter` remain available for
+explicit registration.
 
 For example, use only a configured k-NN family with:
 

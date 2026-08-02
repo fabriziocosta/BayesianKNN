@@ -131,15 +131,17 @@ class FamilyRegistration:
 registry normalizes positive weights to sum to one, rejects duplicate names,
 and filters families that do not support the requested task. A one-entry
 registry is therefore a fixed-family ensemble. If `family_registry` is not
-specified, the default is a uniform mixture of k-NN, gated linear-mixture, Gaussian-mixture, MLP, and
-decision-tree families.
+specified, the default is a uniform mixture of k-NN, gated linear-mixture,
+Gaussian-mixture, MLP, and decision-tree families.
 
 ### Adapter responsibilities
 
 An adapter owns all family-specific parameter logic. `sample_parameters` gets
 a `SamplingContext` containing task, transformed feature count, class count,
 subset size, minimum CV training-fold size, classes, and the shared scale
-prior. It must return one `ParameterDraw` containing:
+prior. For classification it also contains the minimum per-class CV training
+size, which lets class-conditional adapters enforce valid configurations. It
+must return one `ParameterDraw` containing:
 
 ```python
 ParameterDraw(
@@ -174,17 +176,19 @@ default `GaussianMixtureAdapter` instead fits a separate Gaussian mixture for
 every class, with a simplicity prior favoring fewer than 30 components. Both
 families sample covariance structure from `isotropic`, `diagonal`, or `full`.
 Gaussian regression uses `BayesianRidge`; covariance structure is not sampled
-for regression.
+for regression. The default registry uses `GaussianMixtureAdapter`; the
+single-Gaussian family is available through explicit registration.
 
 All built-in adapters currently return predictive concentration `1.0`. In
 particular, k-NN neighbourhood size is already expressed in the k-NN
 probability vector and is not applied a second time as a confidence multiplier.
 This calibration choice keeps family CV scores comparable.
 
-`LinearMixtureAdapter` fits a finite mixture of logistic or ridge experts with
-a learned linear softmax gate. The gate makes expert weights depend on the
-input, so the resulting predictor can represent piecewise-linear nonlinear
-boundaries. Its expert-count prior favors fewer experts.
+`LinearMixtureAdapter` is the default linear family. It fits a finite mixture
+of logistic or ridge experts with a learned linear softmax gate. The gate makes
+expert weights depend on the input, so the resulting predictor can represent
+piecewise-linear nonlinear boundaries. Its expert-count prior favors fewer
+experts. `LinearAdapter` remains available as the single-expert alternative.
 
 ### Registering a new family
 
