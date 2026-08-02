@@ -33,9 +33,7 @@ Conceptually, the framework shifts machine learning from selecting a single opti
 
 ## Goal and design principles
 
-This repository provides a production-quality, fully modular,
-scikit-learn-compatible Bayesian Monte Carlo k-nearest-neighbours classifier
-and regressor.
+This repository provides a production-quality, fully modular, scikit-learn-compatible Bayesian Monte Carlo k-nearest-neighbours classifier and regressor.
 
 The philosophy of the algorithm is:
 
@@ -77,10 +75,7 @@ Initially implement:
 - sparse random projection;
 - identity projection (no projection).
 
-The projection family is selected by an estimator parameter and is fixed for
-all Monte Carlo draws. A family prior is intentionally out of scope; if mixed
-families are added later, their prior probabilities must be specified and
-stored explicitly.
+The projection family is selected by an estimator parameter and is fixed for all Monte Carlo draws. A family prior is intentionally out of scope; if mixed families are added later, their prior probabilities must be specified and stored explicitly.
 
 ### 2. Prediction module
 
@@ -135,9 +130,7 @@ Install the package and its runtime dependencies with:
 python -m pip install .
 ~~~
 
-The estimators use Gaussian random projections, distance-weighted Euclidean
-k-NN, five-fold cross-validation, and automatic Monte Carlo growth by default.
-For a small deterministic run:
+The estimators use Gaussian random projections, distance-weighted Euclidean k-NN, five-fold cross-validation, and automatic Monte Carlo growth by default. For a small deterministic run:
 
 ~~~python
 from bayesian_knn import BayesianKNNClassifier
@@ -148,9 +141,7 @@ probabilities = model.predict_proba(X_test)
 predictions = model.predict(X_test)
 ~~~
 
-`BayesianKNNRegressor` exposes the corresponding `fit`, `predict`, `score`,
-and `get_model_draws` methods. It intentionally does not expose
-`predict_proba`.
+`BayesianKNNRegressor` exposes the corresponding `fit`, `predict`, `score`, and `get_model_draws` methods. It intentionally does not expose `predict_proba`.
 
 ## Unified logistic scale prior
 
@@ -302,10 +293,7 @@ For Gaussian and sparse random projections, use:
 values = range(1, n_features + 1)
 ~~~
 
-For identity, use `values = [n_features]`. The representation module asks the
-scale prior for one projected dimension using the family-specific allowable
-values below.
-Identity never truncates or otherwise changes the feature space.
+For identity, use `values = [n_features]`. The representation module asks the scale prior for one projected dimension using the family-specific allowable values below. Identity never truncates or otherwise changes the feature space.
 
 The projection dimension is a latent variable. For normalized position `u`, the representation-specific form is:
 
@@ -366,17 +354,9 @@ $$
 c_m\sim\mathrm{Uniform}(0,1).
 $$
 
-Construct the logistic distribution, sample one subset size, and then sample
-the subset uniformly from the CV-admissible subsets of that size.
+Construct the logistic distribution, sample one subset size, and then sample the subset uniformly from the CV-admissible subsets of that size.
 
-Validate `1 <= min_subset_size <= max_subset_size <= n_samples`. Let
-`n_splits` equal the integer `cv` value, or `cv.get_n_splits()` for a supplied
-splitter. A subset must be large enough for that splitter. For regression,
-require `m >= n_splits`. For classification, only subsets containing at least
-`n_splits` observations from every global class are admissible. Sample
-uniformly from the admissible subsets for the selected `m`; do not silently
-score an invalid subset. If no admissible subset exists, fail during `fit` with
-a clear validation error.
+Validate `1 <= min_subset_size <= max_subset_size <= n_samples`. Let `n_splits` equal the integer `cv` value, or `cv.get_n_splits()` for a supplied splitter. A subset must be large enough for that splitter. For regression, require `m >= n_splits`. For classification, only subsets containing at least `n_splits` observations from every global class are admissible. Sample uniformly from the admissible subsets for the selected `m`; do not silently score an invalid subset. If no admissible subset exists, fail during `fit` with a clear validation error.
 
 ### Neighbourhood size
 
@@ -422,9 +402,7 @@ $$
 k\le n_{\mathrm{train,min}}\le m.
 $$
 
-The neighbourhood prior must be drawn only after the subset and its CV
-splitter are known. If `k_max < 1`, reject the draw or fail validation rather
-than constructing an invalid model.
+The neighbourhood prior must be drawn only after the subset and its CV splitter are known. If `k_max < 1`, reject the draw or fail validation rather than constructing an invalid model.
 
 The prior implementation must not contain special-case logic for any of these uses. It receives only ordered values and returns one sampled scale.
 
@@ -481,25 +459,15 @@ Use the default:
 cv=5
 ~~~
 
-`cv` must be an integer at least 2 or a scikit-learn splitter. For an integer,
-construct `StratifiedKFold` for classification and `KFold` for regression,
-using the estimator's deterministic seed. For a supplied splitter, clone it
-and validate it for every sampled subset. Classification requires at least
-`n_splits` samples of every global class in an admissible subset. Regression
-requires at least `n_splits` observations. The selected `k` is bounded by the
-smallest training-fold size.
+`cv` must be an integer at least 2 or a scikit-learn splitter. For an integer, construct `StratifiedKFold` for classification and `KFold` for regression, using the estimator's deterministic seed. For a supplied splitter, clone it and validate it for every sampled subset. Classification requires at least `n_splits` samples of every global class in an admissible subset. Regression requires at least `n_splits` observations. The selected `k` is bounded by the smallest training-fold size.
 
-For classification, expand every fold's probability vector to the estimator's
-global `classes_` ordering before averaging. If `p` is the k-neighbour class
-frequency vector and `C` is the number of global classes, Dirichlet smoothing
-uses a documented positive `alpha` parameter:
+For classification, expand every fold's probability vector to the estimator's global `classes_` ordering before averaging. If `p` is the k-neighbour class frequency vector and `C` is the number of global classes, Dirichlet smoothing uses a documented positive `alpha` parameter:
 
 $$
 p_{\mathrm{smooth},j}=\frac{k p_j+\alpha}{k+C\alpha}.
 $$
 
-Apply this to all global classes, including classes absent from an individual
-fold.
+Apply this to all global classes, including classes absent from an individual fold.
 
 For each classification fold:
 
@@ -512,8 +480,7 @@ $$
 \log P(y_i|x_i).
 $$
 
-Average over every validation observation. This is a cross-validated scoring
-utility, not a literal Bayesian likelihood.
+Average over every validation observation. This is a cross-validated scoring utility, not a literal Bayesian likelihood.
 
 For regression, define a Gaussian pseudo-likelihood from validation residuals:
 
@@ -523,11 +490,7 @@ $$
 +\frac{(y_i-\hat y_i)^2}{\sigma_f^2}\right].
 $$
 
-Estimate `sigma_f^2` from the training fold only as
-`max(var(y_train), epsilon**2)`, where `epsilon > 0` is an estimator
-parameter. Average these values over validation observations. This defines a
-leakage-free regression scoring utility while leaving point prediction as the
-weighted k-NN prediction.
+Estimate `sigma_f^2` from the training fold only as `max(var(y_train), epsilon**2)`, where `epsilon > 0` is an estimator parameter. Average these values over validation observations. This defines a leakage-free regression scoring utility while leaving point prediction as the weighted k-NN prediction.
 
 ## Prior probability of a complete model
 
@@ -587,9 +550,7 @@ $$
 \log p(k).
 $$
 
-Because subsets are restricted to CV-admissible subsets, store the actual
-conditional subset probability. For a fixed `m`, let `A_m` be the set of
-admissible subsets:
+Because subsets are restricted to CV-admissible subsets, store the actual conditional subset probability. For a fixed `m`, let `A_m` be the set of admissible subsets:
 
 $$
 \log p(S\mid m)
@@ -600,10 +561,7 @@ Projection-matrix densities may be omitted from posterior weighting if the proje
 
 ## Bayesian model weights
 
-When models are sampled directly from the declared prior, prior probabilities
-are already represented by sampling frequency. Therefore, the default
-self-normalized pseudo-posterior weights should be based on the
-cross-validated pseudo-likelihood alone:
+When models are sampled directly from the declared prior, prior probabilities are already represented by sampling frequency. Therefore, the default self-normalized pseudo-posterior weights should be based on the cross-validated pseudo-likelihood alone:
 
 $$
 w_i
@@ -611,14 +569,9 @@ w_i
 \tilde{L}_{\mathrm{CV}}(\theta_i).
 $$
 
-Compute the stored `posterior_weight` by applying a numerically stable softmax
-to the sampled models' `log_importance_weight` values, so the weights are
-finite and sum to one.
+Compute the stored `posterior_weight` by applying a numerically stable softmax to the sampled models' `log_importance_weight` values, so the weights are finite and sum to one.
 
-Do not multiply by the prior probability again in this default case, because
-that would count the prior twice. These are pseudo-posterior weights, not exact
-Bayesian posterior probabilities, because the scoring utility is
-cross-validated and averaged.
+Do not multiply by the prior probability again in this default case, because that would count the prior twice. These are pseudo-posterior weights, not exact Bayesian posterior probabilities, because the scoring utility is cross-validated and averaged.
 
 Nevertheless, store the log prior probabilities for:
 
@@ -694,14 +647,9 @@ Start with 20 models and double the number of models as follows:
 ...
 ~~~
 
-Reuse previously fitted models and only fit newly required models. Require a
-positive finite `max_estimators`, defaulting to `1280`. If the tolerance
-is not reached by `max_estimators`, stop and set `converged_ = False`; never
-loop indefinitely.
+Reuse previously fitted models and only fit newly required models. Require a positive finite `max_estimators`, defaulting to `1280`. If the tolerance is not reached by `max_estimators`, stop and set `converged_ = False`; never loop indefinitely.
 
-Choose a fixed, reproducibly selected convergence subset. For classifiers,
-compare the averaged class-probability matrices. For regressors, compare the
-averaged prediction vectors. In both cases compute:
+Choose a fixed, reproducibly selected convergence subset. For classifiers, compare the averaged class-probability matrices. For regressors, compare the averaged prediction vectors. In both cases compute:
 
 - maximum absolute change;
 - mean absolute change;
@@ -715,8 +663,7 @@ Stop when:
 difference <= tolerance
 ~~~
 
-`difference` is the configured convergence metric, defaulting to maximum
-absolute change. `tolerance` must be finite and strictly positive.
+`difference` is the configured convergence metric, defaulting to maximum absolute change. `tolerance` must be finite and strictly positive.
 
 Store:
 
@@ -726,11 +673,7 @@ Store:
 
 ## Parallelization
 
-Each Monte Carlo draw is completely independent. Derive one deterministic
-child seed from `(random_state, draw_index)` and use it for that draw. Never
-share or mutate one RNG across parallel workers; this guarantees identical
-results for repeated fits with the same seed and stable reuse during automatic
-estimator growth.
+Each Monte Carlo draw is completely independent. Derive one deterministic child seed from `(random_state, draw_index)` and use it for that draw. Never share or mutate one RNG across parallel workers; this guarantees identical results for repeated fits with the same seed and stable reuse during automatic estimator growth.
 
 Use joblib.Parallel for:
 
@@ -802,14 +745,9 @@ score()
 get_model_draws()
 ~~~
 
-The regressor supports `fit()`, `predict()`, `score()`, and
-`get_model_draws()`. It does not expose `predict_proba()`, consistent with the
-scikit-learn estimator API.
+The regressor supports `fit()`, `predict()`, `score()`, and `get_model_draws()`. It does not expose `predict_proba()`, consistent with the scikit-learn estimator API.
 
-The estimator constructors must expose, validate, and preserve through
-cloning the parameters that affect these rules, including `cv`, `alpha`,
-`epsilon`, `max_neighbors`, `n_estimators`, `max_estimators`, `tolerance`,
-`convergence_metric`, `n_jobs`, and `random_state`.
+The estimator constructors must expose, validate, and preserve through cloning the parameters that affect these rules, including `cv`, `alpha`, `epsilon`, `max_neighbors`, `n_estimators`, `max_estimators`, `tolerance`, `convergence_metric`, `n_jobs`, and `random_state`.
 
 The implementation must comply with the scikit-learn estimator API and support cloning, pipelines, and GridSearchCV. It must be organized so that new representation modules, priors, convergence criteria, or prediction engines can be added without changing the core Bayesian integration logic.
 
@@ -829,10 +767,8 @@ Add unit tests covering:
 10. stored log_probability equals the logarithm of the sampled probability;
 11. sampled `k` never exceeds the smallest CV training-fold size;
 12. invalid subset sizes and class-inadequate subsets fail validation;
-13. classifier fold probabilities align to global classes and remain normalized
-    after smoothing;
-14. regression pseudo-likelihood scores are finite and use training-fold-only
-    variance estimates;
+13. classifier fold probabilities align to global classes and remain normalized after smoothing;
+14. regression pseudo-likelihood scores are finite and use training-fold-only variance estimates;
 15. identity projection always returns the original feature dimension;
 16. automatic convergence stops at `max_estimators` when tolerance is not met;
 17. repeated seeded parallel fits produce identical model draws and weights.
