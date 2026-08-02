@@ -1,908 +1,476 @@
-# Bayesian Model Averaging
+# Bayesian Model Averaging Architecture
 
-## Executive summary
+This document describes the implemented architecture. The package is a
+scikit-learn-compatible ensemble that samples complete predictive models from
+declared priors, scores them with cross-validation, and averages their
+predictions. It does not optimize one hyperparameter configuration.
 
-This project implements Bayesian-style model averaging over k-nearest-neighbours,
-linear, and Gaussian predictive models rather than hyperparameter optimization.
+## Design
 
-Traditional k-NN requires several modelling decisions, including the number of neighbours, the representation of the feature space, and often the amount of data used to construct the neighbourhood. These choices are typically treated as hyperparameters and selected through cross-validation or other optimization procedures, resulting in a single model that is then used for prediction.
+The core integrates four kinds of uncertainty:
 
-The central idea of this work is fundamentally different.
+1. estimator family;
+2. feature representation and projection dimension;
+3. training subset;
+4. estimator-family parameters.
 
-Instead of searching for one “best” model, every reasonable k-NN configuration is regarded as a plausible explanation of the data. Each configuration defines a simple predictive model, and the final prediction is obtained by averaging over many such models according to their support from the observed data.
+Each Monte Carlo draw is a complete, fitted model. The draw records its prior
+and cross-validated score, while the ensemble weight is determined by the
+cross-validated pseudo-likelihood. This keeps the integration engine generic:
+family-specific parameter logic lives in adapters, and scoring only depends on
+the estimator contract.
 
-The implementation therefore replaces optimization with integration.
+The fit pipeline is:
 
-For the default k-NN family, three independent sources of modelling uncertainty
-are explicitly represented:
+```text
+validate data and CV
+        |
+normalize runtime family registry
+        |
+sample family -> compatible representation -> projection parameters
+        |
+sample CV-admissible subset -> construct SamplingContext
+        |
+adapter samples complete parameters
+        |
+generic CV score -> fit final estimator -> store ModelDraw
+        |
+stable softmax over CV scores -> predictions, masses, convergence
+```
 
-- **Representation scale**, describing how the original feature space is viewed through random projections.
-- **Data scale**, describing how much of the training data participates in constructing an individual local model.
-- **Prediction scale**, describing the size of the neighbourhood used for local prediction.
+## Package layout
 
-Rather than fixing any of these quantities, they are treated as latent random variables and sampled from common probabilistic priors. A single reusable scale-prior mechanism governs all ordered scale variables, ensuring that the implementation remains conceptually simple and internally consistent.
-
-The estimator integrates across predictive model families through a runtime
-adapter registry. The default registry contains k-NN, linear, and Gaussian
-adapters with equal prior weight. MLP is available as an opt-in adapter. Each
-registration has an explicit family prior weight, and each
-adapter owns the prior over its complete estimator-parameter configuration.
-All registered models are averaged using the same cross-validated
-pseudo-posterior weights.
-
-Each sampled model is evaluated using a cross-validated predictive pseudo-likelihood. These predictive scores determine the contribution of each model to the final Bayesian model average. Consequently, models that make better predictions naturally receive greater influence, while models that are less predictive contribute proportionally less.
-
-The resulting algorithm has several attractive properties:
-
-1. It avoids committing to a single arbitrary choice of neighbourhood size, projection dimension, or subset size. Instead, it integrates over uncertainty in these quantities.
-2. It preserves the simplicity and interpretability of the component models. Every sampled model is a standard estimator from one of the supported families; only the averaging procedure is new.
-3. It is naturally parallel. Each Monte Carlo model is completely independent of every other model, allowing straightforward parallel execution across multiple processor cores.
-4. It is intentionally modular. Representation learning, scale priors, prediction, scoring, convergence diagnostics, and Bayesian averaging are independent components with clearly defined interfaces.
-
-Conceptually, the framework shifts machine learning from selecting a single optimal model to quantifying uncertainty over an entire family of simple local models. Predictions emerge from Bayesian averaging across scales rather than from committing to one particular representation or one particular notion of locality.
-
-## Goal and design principles
-
-This repository provides production-quality, modular, scikit-learn-compatible
-Bayesian model-averaging classifiers and regressors.
-
-The philosophy of the algorithm is:
-
-- do **not** optimize hyperparameters;
-- do **not** select a single model;
-- instead **integrate over an entire family of simple predictive models**.
-
-Every uncertain modelling choice is treated as a latent variable and integrated out by Monte Carlo sampling.
-
-The implementation should be clean, modular, well documented, fully typed, and suitable for open-source release.
-
-Each component should have a single responsibility. Avoid monolithic files.
-
-## High-level architecture
-
-The algorithm has four independent modules.
-
-### 1. Representation module
-
-This module transforms the feature space. The default implementation is a **mixed representation family** that includes random projections and the identity representation.
-
-The representation module is independent of the prediction module. Its purpose is simply to generate alternative representations of the input space.
-
-It should expose an interface such as:
-
-~~~
-fit(X)
-
-transform(X)
-
-sample_parameters(random_state)
-~~~
-
-The design must allow future projection families to be added without modifying the prediction code.
-
-Initially implement:
-
-- Gaussian random projection;
-- sparse random projection;
-- identity projection (no projection).
-
-The estimator parameter `representation` accepts `"gaussian"`, `"sparse"`,
-`"identity"`, or `"mixed"`. The fixed-family modes use the selected family for
-every Monte Carlo draw. The default `"mixed"` mode samples uniformly from all
-three families, with family probability `1/3` recorded in every model draw.
-Cross-validated pseudo-likelihoods determine the model weights, so the identity
-family can retain its full feature space when compression is not predictive.
-
-### 2. Prediction module
-
-For k-NN draws, prediction is standard weighted k-nearest neighbours.
-
-The prediction module knows nothing about random projections. It receives
-transformed data only and supports classification and regression estimators
-selected by the sampled model family.
-
-### 3. Estimator-family adapters
-
-The estimator accepts a runtime `family_registry` containing
-`FamilyRegistration(adapter, prior_weight)` entries. A registry with one entry
-selects one family; multiple entries define a family mixture. The core samples
-the registered family using normalized prior weights and does not contain
-family-name conditionals.
-
-Every adapter declares its supported tasks and representations, samples a
-complete valid parameter configuration, constructs a scikit-learn estimator,
-and declares any predictive concentration used by the generic scorer. A new
-family can therefore be added without changing the Bayesian integration engine.
-
-The built-in k-NN, linear, and Gaussian adapters are representation-agnostic:
-each accepts identity, Gaussian-projection, and sparse-projection feature
-matrices. MLP currently accepts identity features only.
-
-The built-in adapters are k-NN, linear, Gaussian, and MLP; MLP is not included
-in the default registry. The MLP adapter uses structured priors over
-architecture, activation, regularization, and
-learning rate. Gaussian covariance structure is sampled by its adapter as a
-discrete parameter of the complete family draw. The structures are ordered by
-complexity:
-
-$$
-q_{\mathrm{iso}}=1,\qquad
-q_{\mathrm{diag}}=d,\qquad
-q_{\mathrm{full}}=\frac{d(d+1)}{2}.
-$$
-
-With simplicity parameter `lambda`, the prior is
-
-$$
-P(s)\propto\exp\{-\lambda\log(1+q_s)\}.
-$$
-
-The default `lambda=1` gives isotropic covariance the greatest prior mass,
-then diagonal, then full covariance when `d > 1`. The selected structure and
-its conditional probability are stored with the draw. Gaussian regression
-uses `BayesianRidge`; covariance structure is a classification-only choice.
-
-### 4. Bayesian integration module
-
-This module performs Monte Carlo sampling over complete models.
-
-Each Monte Carlo draw samples:
-
-- a registered model family using its normalized prior weight;
-- a representation family supported by the selected adapter;
-- representation parameters within the selected representation family;
-- subset size and subset;
-- a complete adapter-owned estimator-parameter draw.
-
-It fits the corresponding model, computes its cross-validated pseudo-likelihood, and contributes to the Bayesian model average.
-
-## Package structure
-
-~~~
+```text
 bayesian_model_averaging/
-
-    __init__.py
-
-    classifier.py
-    regressor.py
-
-    representation/
-        base.py
-        gaussian_projection.py
-        sparse_projection.py
-        identity.py
-
-    priors.py
-    adapters.py
-    model_families.py
-    sampling.py
-    scoring.py
-    convergence.py
-
-    models.py
-    utils.py
-~~~
-
-## Installation and quick start
-
-Install the package and its runtime dependencies with:
-
-~~~bash
-python -m pip install .
-~~~
-
-The estimators use the default weighted family registry, a mixed representation
-family where supported, five-fold cross-validation, and automatic Monte Carlo
-growth by default. Pass a one-entry `family_registry` to use only one family.
-For a small deterministic run:
-
-~~~python
-from bayesian_model_averaging import BayesianModelAveragingClassifier
-
-model = BayesianModelAveragingClassifier(n_estimators=20, random_state=7, n_jobs=-1)
-model.fit(X_train, y_train)
-probabilities = model.predict_proba(X_test)
-predictions = model.predict(X_test)
-~~~
-
-The optional `temperature` parameter controls concentration of the ensemble
-weights. It defaults to `1.0`; values below one concentrate mass on models
-with higher cross-validated pseudo-likelihood, while values above one spread
-mass more evenly. This is model-weight tempering, not post-hoc calibration of
-the final class probabilities.
-
-`BayesianModelAveragingRegressor` exposes the corresponding `fit`, `predict`, `score`, and `get_model_draws` methods. It intentionally does not expose `predict_proba`.
-
-## Unified logistic scale prior
-
-### Conceptual role
-
-The package uses one common modelling assumption for ordered scales:
-
-> Ordered model scales should be sampled from a monotone decreasing prior, with smaller scales preferred a priori, while uncertainty about the strength and location of that preference is integrated out.
-
-Do not implement separate prior classes for projection dimension, training-subset size, and neighbourhood size. All three must use the same generic sampler.
-
-The class must be independent of k-NN, random projections, classification, and regression. It should operate only on an ordered collection of allowable values.
-
-### Required class and API
-
-Implement a class such as:
-
-~~~
-LogisticScalePrior
-~~~
-
-in:
-
-~~~
-bayesian_model_averaging/priors.py
-~~~
-
-Provide a method such as:
-
-~~~
-draw(
-    values: Sequence[int],
-    rng: np.random.Generator,
-) -> ScalePriorDraw
-~~~
-
-The returned object must be an immutable dataclass containing:
-
-~~~
-value
-index
-beta
-cutoff
-probability
-log_probability
-probabilities
-~~~
-
-These fields mean:
-
-- value is the sampled allowable value;
-- index is its position in values;
-- beta is the sampled positive logistic slope;
-- cutoff is the sampled cutoff value;
-- probability is the normalized probability assigned to the sampled value;
-- log_probability is its logarithm;
-- probabilities is the complete normalized discrete distribution over all allowable values.
-
-### Statistical definition
-
-Given ordered allowable values:
-
-$$
-v_1,\ldots,v_J,
-$$
-
-map their positions to the normalized interval:
-
-$$
-u_j =
-\begin{cases}
-0, & J=1,\\
-\frac{j}{J-1}, & J>1,
-\end{cases}
-\qquad j=0,\ldots,J-1.
-$$
-
-For each draw, sample:
-
-$$
-\beta \sim \mathrm{Gamma}(a_\beta,s_\beta),
-$$
-
-and
-
-$$
-c\sim\mathrm{Uniform}(0,1).
-$$
-
-Use the defaults:
-
-~~~
-beta_shape=2.0
-beta_scale=1.0
-~~~
-
-Define the unnormalized probability of each allowable value as:
-
-$$
-q_j
-=
-\frac{1}
-{1+\exp(\beta(u_j-c))}.
-$$
-
-Normalize:
-
-$$
-p_j=\frac{q_j}{\sum_r q_r}.
-$$
-
-Then sample one allowable value according to the normalized probabilities. Because the sampled logistic slope is positive, this prior is monotone decreasing over the ordered values and therefore prefers smaller scales.
-
-For a single allowable value, return that value with probability one while still sampling and recording beta and cutoff.
-
-### Numerical stability and validation
-
-Compute the logistic weights stably. Prefer a formulation such as:
-
-~~~
-log_weights = -np.logaddexp(0.0, beta * (u - cutoff))
-~~~
-
-Then normalize in log space using:
-
-~~~
-scipy.special.logsumexp
-~~~
-
-Do not compute unstable exponentials directly.
-
-Validate that:
-
-- values is one-dimensional;
-- values is non-empty;
-- values is ordered;
-- beta_shape > 0;
-- beta_scale > 0.
-
-## Reuse of the common prior
-
-The exact same LogisticScalePrior instance or configuration must be reusable for all three model components.
-
-### Projection dimension
-
-For Gaussian and sparse random projections, use:
-
-~~~
-values = range(1, n_features + 1)
-~~~
-
-For identity, use `values = [n_features]`. The representation module asks the
-scale prior for one projected dimension using the family-specific allowable
-values below. Identity never truncates or otherwise changes the feature space.
-
-When `representation="mixed"`, first sample the family uniformly from
-`("gaussian", "sparse", "identity")`. Store that family probability and add
-its log probability to the model's recorded prior. Because models are sampled
-directly from this declared prior, the default self-normalized weights still
-use the cross-validated pseudo-likelihood alone; do not multiply the family
-probability into the weights a second time.
-
-The projection dimension is a latent variable. For normalized position `u`, the representation-specific form is:
-
-$$
-u=\begin{cases}
-0,&d=1,\\
-\frac{d'-1}{d-1},&d>1.
-\end{cases}
-$$
-
-Sample:
-
-$$
-\beta_d\sim\mathrm{Gamma}(2,1)
-$$
-
-and
-
-$$
-c_d\sim\mathrm{Uniform}(0,1).
-$$
-
-Define:
-
-$$
-P(u)
-\propto
-\frac{1}
-{1+\exp(\beta_d(u-c_d))}.
-$$
-
-Discretize this over all allowable projection dimensions, sample one projection dimension, and then sample the projection matrix according to the selected representation family.
-
-### Training-subset size
-
-Use:
-
-~~~
-values = range(min_subset_size, max_subset_size + 1)
-~~~
-
-The Monte Carlo model sampler asks for one subset size. For normalized position `u`, the subset-specific form is:
-
-$$
-u=\frac{m-m_{\min}}
-{m_{\max}-m_{\min}}.
-$$
-
-Sample:
-
-$$
-\beta_m\sim\mathrm{Gamma}(2,1)
-$$
-
-and
-
-$$
-c_m\sim\mathrm{Uniform}(0,1).
-$$
-
-Construct the logistic distribution, sample one subset size, and then sample the subset uniformly from the CV-admissible subsets of that size.
-
-Validate `1 <= min_subset_size <= max_subset_size <= n_samples`. Let `n_splits` equal the integer `cv` value, or `cv.get_n_splits()` for a supplied splitter. A subset must be large enough for that splitter. For regression, require `m >= n_splits`. For classification, only subsets containing at least `n_splits` observations from every global class are admissible. Sample uniformly from the admissible subsets for the selected `m`; do not silently score an invalid subset. If no admissible subset exists, fail during `fit` with a clear validation error.
-
-### Neighbourhood size
-
-Use:
-
-~~~
-values = range(1, k_max + 1)
-~~~
-
-where the minimum CV training-fold size is:
-
-~~~
-n_train_min = min(
-    len(train_indices)
-    for train_indices, _ in cv_splitter.split(X_subset, y_subset)
+  __init__.py          public exports
+  base.py              shared sklearn estimator and ensemble engine
+  classifier.py        BayesianModelAveragingClassifier
+  regressor.py         BayesianModelAveragingRegressor
+  adapters.py          adapter protocol, registrations, built-in adapters
+  priors.py            reusable prior objects and draw records
+  sampling.py          complete-model sampling, CV subsets, fitting
+  scoring.py           generic classification and regression scoring
+  models.py            ModelDraw and posterior-mass diagnostics
+  model_families.py    GaussianClassifier implementation
+  convergence.py       prediction-change convergence metrics
+  utils.py             deterministic seeds and numerical helpers
+  representation/
+    base.py            representation interface and factory
+    identity.py        unchanged row features
+    gaussian_projection.py
+    sparse_projection.py
+  experiments/
+    classification_2d.py
+```
+
+## Estimator API
+
+The public estimators are:
+
+```python
+from bayesian_model_averaging import (
+    BayesianModelAveragingClassifier,
+    BayesianModelAveragingRegressor,
 )
-~~~
 
-Then:
-
-~~~
-k_max = min(n_train_min, subset_size)
-~~~
-
-when max_neighbors=None, otherwise:
-
-~~~
-k_max = min(max_neighbors, n_train_min, subset_size)
-~~~
-
-The prediction module asks for one neighbourhood size. For normalized position `u`, the neighbourhood-specific form is:
-
-$$
-u=\frac{k-1}
-{k_{\max}-1}.
-$$
-
-Sample beta and cutoff using the same generic prior, generate the logistic distribution, and sample one neighbourhood size.
-
-The default `max_neighbors=None` means:
-
-$$
-k\le n_{\mathrm{train,min}}\le m.
-$$
-
-The neighbourhood prior must be drawn only after the subset and its CV splitter are known. If `k_max < 1`, reject the draw or fail validation rather than constructing an invalid model.
-
-The prior implementation must not contain special-case logic for any of these uses. It receives only ordered values and returns one sampled scale.
-
-## Dependency injection and architecture
-
-Use dependency injection. The top-level estimator should accept a scale-prior object or scale-prior configuration, for example:
-
-~~~
-scale_prior=LogisticScalePrior(
-    beta_shape=2.0,
-    beta_scale=1.0,
+classifier = BayesianModelAveragingClassifier(
+    n_estimators=40,
+    random_state=7,
 )
-~~~
+classifier.fit(X_train, y_train)
+probabilities = classifier.predict_proba(X_test)
+predictions = classifier.predict(X_test)
 
-The same prior object should be made available to:
+regressor = BayesianModelAveragingRegressor(n_estimators=40, random_state=7)
+regressor.fit(X_train, y_train)
+predictions = regressor.predict(X_test)
+```
 
-- the representation sampler;
-- the subset sampler;
-- adapter-owned ordered-scale samplers such as the k-NN neighbourhood sampler.
+Both estimators expose `fit`, `predict`, `score`, and `get_model_draws`.
+Classifiers additionally expose `predict_proba`; regressors intentionally do
+not. The estimators preserve constructor parameters through sklearn cloning,
+pipelines, and `GridSearchCV`.
 
-Do not duplicate the logistic sampling code anywhere else in the package.
+Important constructor parameters are:
 
-This unified scale-selection principle treats projection complexity, dataset complexity, and prediction locality as ordered scales integrated using the same prior mechanism.
+- `family_registry`: runtime estimator-family registrations;
+- `representation`: `"identity"`, `"gaussian"`, `"sparse"`, or `"mixed"`;
+- `scale_prior`: the prior used for projection dimension and subset size;
+- `min_subset_size`, `max_subset_size`, and `cv`;
+- `n_estimators`, or `"auto"` with `max_estimators`;
+- `tolerance`, `convergence_metric`, and `convergence_size`;
+- `alpha` for classification probability smoothing;
+- `epsilon` for the regression variance floor;
+- `temperature` for ensemble-weight concentration;
+- `n_jobs` and `random_state`.
 
-The component should be designed so that another prior family can later implement the same interface, for example:
+## Runtime family adapters
 
-~~~
-BetaScalePrior
-PowerLawScalePrior
-ExponentialPowerScalePrior
-~~~
+Family selection is registry-driven. The core does not branch on family names.
+The public interfaces are:
 
-without changing the representation, sampling, scoring, or prediction modules.
+```python
+class EstimatorFamilyAdapter(Protocol):
+    name: str
+    supported_tasks: frozenset[str]
+    supported_representations: frozenset[str]
 
-## One Monte Carlo model draw
+    def sample_parameters(context, rng) -> ParameterDraw: ...
 
-One draw samples:
+    def build_estimator(task, parameters, random_state) -> BaseEstimator: ...
 
-1. registered model family and its prior probability;
-2. representation family and projection parameters;
-3. subset logistic parameters, size, and indices;
-4. the complete adapter-owned estimator-parameter draw.
+    def predictive_concentration(task, parameters) -> float: ...
 
-The transformed subset is then fitted with the selected estimator. Every
-sampled parameter is retained.
+@dataclass(frozen=True)
+class FamilyRegistration:
+    adapter: EstimatorFamilyAdapter
+    prior_weight: float = 1.0
+```
 
-## Cross-validated pseudo-likelihood
+`FamilyRegistration` entries may also be supplied as adapters directly. The
+registry normalizes positive weights to sum to one, rejects duplicate names,
+and filters families that do not support the requested task. A one-entry
+registry is therefore a fixed-family ensemble. If `family_registry` is not
+specified, the default is a uniform mixture of k-NN, linear, and Gaussian
+families. MLP is available but opt-in.
 
-Use the default:
+### Adapter responsibilities
 
-~~~
-cv=5
-~~~
+An adapter owns all family-specific parameter logic. `sample_parameters` gets
+a `SamplingContext` containing task, transformed feature count, class count,
+subset size, minimum CV training-fold size, classes, and the shared scale
+prior. It must return one `ParameterDraw` containing:
 
-`cv` must be an integer at least 2 or a scikit-learn splitter. For an integer, construct `StratifiedKFold` for classification and `KFold` for regression, using the estimator's deterministic seed. For a supplied splitter, clone it and validate it for every sampled subset. Classification requires at least `n_splits` samples of every global class in an admissible subset. Regression requires at least `n_splits` observations. The selected `k` is bounded by the smallest training-fold size.
+```python
+ParameterDraw(
+    parameters={...},       # complete valid estimator configuration
+    log_probability=...,    # joint log prior of that configuration
+    metadata={...},         # conditional-prior diagnostics
+)
+```
 
-For classification, expand every fold's probability vector to the estimator's global `classes_` ordering before averaging. If `p` is the classifier probability vector and `C` is the number of global classes, Dirichlet smoothing uses a documented positive `alpha` parameter and unit predictive concentration for the built-in classifier families:
+The core never interprets individual parameter names. This supports conditional
+and structured priors, including neural-network architecture choices.
 
-$$
-p_{\mathrm{smooth},j}=\frac{p_j+\alpha}{1+C\alpha}.
-$$
+`build_estimator` must return a fresh sklearn-compatible estimator. For
+classification, the built estimator must provide `predict_proba`; adapters that
+only expose `decision_function` are rejected in this version. An adapter can
+override `predictive_concentration`, but the value must be positive and finite.
 
-Apply this to all global classes, including classes absent from an individual fold.
+### Built-in adapters
 
-For each classification fold:
+| Adapter | Classification | Regression | Representations | Main parameters |
+| --- | --- | --- | --- | --- |
+| `KNNAdapter` | `KNeighborsClassifier` | `KNeighborsRegressor` | identity, Gaussian projection, sparse projection | `n_neighbors`, `weights`, `metric` |
+| `LinearAdapter` | `LogisticRegression` | `Ridge` | identity, Gaussian projection, sparse projection | solver/iterations or ridge `alpha` |
+| `GaussianAdapter` | `GaussianClassifier` | `BayesianRidge` | identity, Gaussian projection, sparse projection | classification covariance structure |
+| `MLPAdapter` | `MLPClassifier` | `MLPRegressor` | identity | architecture, activation, regularization, learning rate |
 
-- fit on the training fold;
-- predict probabilities on the validation fold;
-- apply Dirichlet smoothing;
-- accumulate
+The Gaussian classifier fits a separate Gaussian likelihood for every class.
+Its sampled covariance structure is one of `isotropic`, `diagonal`, or `full`.
+Gaussian regression uses `BayesianRidge`; covariance structure is not sampled
+for regression.
 
-$$
-\log P(y_i|x_i).
-$$
+All built-in adapters currently return predictive concentration `1.0`. In
+particular, k-NN neighbourhood size is already expressed in the k-NN
+probability vector and is not applied a second time as a confidence multiplier.
+This calibration choice keeps family CV scores comparable.
 
-Average over every validation observation. This is a cross-validated scoring utility, not a literal Bayesian likelihood.
+### Registering a new family
 
-The k-NN neighbourhood size affects its probability vector, but is not used a
-second time as a confidence multiplier. This keeps cross-validated
-pseudo-likelihoods comparable across k-NN, linear, Gaussian, and MLP families.
-Custom adapters may provide a different predictive concentration only when
-that calibration is intentional and comparable across registered families.
+A new sklearn family requires one adapter and its priors; the core, scorer,
+model record, and estimator classes do not need modification.
 
-For regression, define a Gaussian pseudo-likelihood from validation residuals:
+```python
+class ToyAdapter:
+    name = "toy"
+    supported_tasks = frozenset({"classification"})
+    supported_representations = frozenset({"identity"})
 
-$$
-\log \tilde P(y_i\mid x_i,\theta)
-=-\frac12\left[\log(2\pi\sigma_f^2)
-+\frac{(y_i-\hat y_i)^2}{\sigma_f^2}\right].
-$$
+    def sample_parameters(self, context, rng):
+        value, log_probability, metadata = my_prior.draw(rng)
+        return ParameterDraw(
+            parameters={"my_parameter": value},
+            log_probability=log_probability,
+            metadata=metadata,
+        )
 
-Estimate `sigma_f^2` from the training fold only as `max(var(y_train), epsilon**2)`, where `epsilon > 0` is an estimator parameter. Average these values over validation observations. This defines a leakage-free regression scoring utility while leaving point prediction as the weighted average of the selected regression estimators.
+    def build_estimator(self, task, parameters, random_state):
+        return MySklearnClassifier(my_parameter=parameters["my_parameter"])
 
-## Prior probability of a complete model
+    def predictive_concentration(self, task, parameters):
+        return 1.0
 
-Each Monte Carlo model draw must store separate prior draws for:
+model = BayesianModelAveragingClassifier(
+    family_registry=[FamilyRegistration(ToyAdapter(), prior_weight=1.0)]
+)
+```
 
-~~~
+## Representations
+
+The representation is sampled independently for each model draw, subject to
+the selected adapter's `supported_representations`.
+
+- `identity` passes the row features through unchanged.
+- `gaussian` uses a Gaussian random projection.
+- `sparse` uses a sparse random projection.
+- `mixed` samples uniformly from the compatible representation families for
+  that adapter.
+
+There is no separate `auto` spelling in the current API; `mixed` is the mode
+that integrates over identity, Gaussian, and sparse representations where the
+adapter permits them. Thus `representation="identity"` always uses the input
+row features, while `representation="mixed"` can use any compatible option on
+different draws.
+
+Projection dimensions are sampled from the shared `LogisticScalePrior` over
+`1..n_features`. Identity uses the singleton dimension `[n_features]`, so it
+never truncates the feature space. The representation object is fitted on the
+sampled training data and retained with the model draw for prediction.
+
+Linear and Gaussian adapters are representation-agnostic in this design: they
+consume whichever transformed feature matrix the core supplies. MLP remains
+identity-only until its projected-feature behavior is explicitly validated.
+
+## Priors
+
+`priors.py` contains reusable prior objects. Each prior returns both a sampled
+value and the log probability of that value, together with metadata sufficient
+for diagnostics.
+
+### Ordered scale prior
+
+`LogisticScalePrior` is shared by projection dimension and subset size, and is
+available to adapters for ordered parameters such as k-NN neighbourhood size.
+For ordered values with normalized positions `u`, each draw samples:
+
+```text
+beta   ~ Gamma(beta_shape, beta_scale)
+cutoff ~ Uniform(0, 1)
+q(u)   = 1 / (1 + exp(beta * (u - cutoff)))
+p(u)   = q(u) / sum(q)
+```
+
+The implementation evaluates the distribution in log space, validates a
+strictly increasing non-empty integer sequence, and records the full discrete
+probability vector in `ScalePriorDraw`.
+
+### Generic parameter priors
+
+- `CategoricalPrior` samples finite values.
+- `IntegerChoicePrior` validates finite integer choices.
+- `LogUniformPrior` samples positive continuous values on a log scale.
+- `SimplicityCategoricalPrior` decreases mass with declared complexity.
+- `GaussianCovariancePrior` weights covariance structures by the number of
+  covariance parameters:
+
+  ```text
+  isotropic: 1
+  diagonal:  n_features
+  full:      n_features * (n_features + 1) / 2
+  ```
+
+`MLPAdapter` uses a finite, simplicity-weighted architecture prior rather than
+independently sampling incompatible layer fields. Its joint parameter prior
+covers `hidden_layer_sizes`, activation (including `logistic`), `alpha`, and
+`learning_rate_init`.
+
+## Sampling a complete model
+
+`sampling.py` performs the following sequence for every deterministic child
+seed:
+
+1. select a registered family using normalized family weights;
+2. validate the selected task and choose a compatible representation;
+3. sample projection dimension and fit the representation;
+4. sample an admissible subset size and a subset uniformly conditional on that
+   size;
+5. construct the CV splitter and `SamplingContext`;
+6. ask the adapter for a complete parameter draw;
+7. score the configuration through the generic scorer;
+8. build and fit the final estimator on the transformed subset;
+9. store the resulting `ModelDraw`.
+
+Classification subsets must contain at least `cv` observations from every
+global class. Regression subsets must contain at least `cv` observations.
+The sampled k-NN neighbourhood size is bounded by the smallest CV training
+fold, and invalid configurations fail rather than being silently scored.
+
+The stored prior contribution is:
+
+```text
+log_prior =
+    log(family prior)
+  + log(representation prior)
+  + projection-scale log probability
+  + subset-size log probability
+  + conditional subset log probability
+  + adapter-parameter log probability
+```
+
+`log_proposal` is equal to `log_prior` because the current sampler proposes
+directly from the declared prior. Projection-matrix density terms are not
+added because the matrix is sampled from the representation's prior.
+
+## Generic scoring
+
+### Classification
+
+`classification_cv_score` works with any adapter that builds an estimator with
+`predict_proba`:
+
+1. fit a fresh estimator on each training fold;
+2. align local estimator classes to the global class ordering;
+3. apply predictive concentration and Dirichlet smoothing;
+4. average validation log probabilities.
+
+For class probability `p`, concentration `kappa`, and smoothing `alpha`:
+
+```text
+p_smoothed = (kappa * p + alpha) /
+             (kappa + number_of_global_classes * alpha)
+```
+
+Absent fold classes receive the smoothing mass. The score is a leakage-free
+cross-validated pseudo-log-likelihood, not an exact Bayesian likelihood.
+
+### Regression
+
+`regression_cv_score` uses `predict()` and a Gaussian residual likelihood. The
+variance is estimated from the training fold only:
+
+```text
+sigma2 = max(var(y_train), epsilon**2)
+log_score = -0.5 * (log(2*pi*sigma2) + residual**2 / sigma2)
+```
+
+The mean validation score is used for model weighting; predictions remain the
+weighted average of fitted estimator predictions.
+
+## Weights, prediction, and diagnostics
+
+For ordinary prior sampling, posterior ensemble weights are the stable softmax
+of CV pseudo-log-likelihoods:
+
+```text
+log_importance_weight = cv_log_pseudo_likelihood
+posterior_weight      = softmax(log_importance_weight / temperature)
+```
+
+The recorded prior is not multiplied into the weight a second time. Sampling
+frequency already represents the prior. `temperature < 1` concentrates mass on
+better-scoring models; `temperature > 1` spreads mass more evenly.
+
+For classification, predictions are the weighted average of globally aligned
+probability vectors. For regression, predictions are the weighted average of
+model predictions.
+
+`get_model_draws()` returns serializable dictionaries containing generic fields:
+
+```text
+family_name
+family_prior_probability
+parameters
+parameter_prior
+representation_family
+representation_family_probability
+projection_dimension
+projection_parameters
+subset_size
+subset_indices
 projection_scale_draw
 subset_scale_draw
-neighbor_scale_draw
-~~~
-
-Each of these records must expose:
-
-~~~
-value
-beta
-cutoff
-probability
-log_probability
-~~~
-
-Mixed-family draws additionally store the selected model family and its prior
-probability. Gaussian classification draws store the selected covariance
-structure, its probability, and the complete covariance-prior draw.
-
-The complete model record must therefore make it possible to reconstruct:
-
-- the selected model family and, where applicable, covariance structure;
-- the selected projection dimension;
-- the selected subset size;
-- the selected neighbourhood size;
-- the prior probability of each selection;
-- the latent logistic parameters that generated each selection.
-
-The model sampler should compute:
-
-$$
-\log p(\theta)
-=
-\log p(f)
-+ \log p(s_{\mathrm{cov}}\mid f)
-+ \log p(d')
-+
-\log p(m)
-+
-\log p(k)
-+
-\log p(S\mid m)
-+
-\log p(R\mid d'),
-$$
-
-where applicable.
-
-For a k-NN draw, store the sum of the three scale-selection log probabilities:
-
-$$
-\log p_{\mathrm{scale}}(\theta)
-=
-\log p(d')
-+
-\log p(m)
-+
-\log p(k).
-$$
-
-Because subsets are restricted to CV-admissible subsets, store the actual conditional subset probability. For a fixed `m`, let `A_m` be the set of admissible subsets:
-
-$$
-\log p(S\mid m)
-=-\log |A_m|,\qquad S\in A_m.
-$$
-
-Projection-matrix densities may be omitted from posterior weighting if the projection matrix is sampled directly from its prior and the proposal equals the prior, but document this clearly.
-
-## Bayesian model weights
-
-When models are sampled directly from the declared prior, prior probabilities are already represented by sampling frequency. Therefore, the default self-normalized pseudo-posterior weights should be based on the cross-validated pseudo-likelihood alone:
-
-$$
-w_i
-\propto
-\tilde{L}_{\mathrm{CV}}(\theta_i).
-$$
-
-Compute the stored `posterior_weight` by applying a numerically stable softmax to the sampled models' `log_importance_weight` values, so the weights are finite and sum to one.
-
-With temperature `T`, use
-
-$$
-w_i(T) = \operatorname{softmax}_i\left(\frac{\ell_i}{T}\right),
-$$
-
-where `ell_i` is the model's cross-validated pseudo-log-likelihood. Thus
-`T < 1` favors the most supported models and can sharpen decision boundaries,
-whereas `T > 1` increases model averaging and smooths them. The default
-`T = 1` is the ordinary pseudo-posterior weighting.
-
-Do not multiply by the prior probability again in this default case, because that would count the prior twice. These are pseudo-posterior weights, not exact Bayesian posterior probabilities, because the scoring utility is cross-validated and averaged.
-
-Nevertheless, store the log prior probabilities for:
-
-- diagnostics;
-- reproducibility;
-- possible future importance sampling;
-- verifying that the sampler behaves as expected.
-
-The implementation should clearly distinguish:
-
-~~~
 log_prior
 log_proposal
 cv_log_pseudo_likelihood
 log_importance_weight
 posterior_weight
-~~~
-
-For ordinary prior sampling:
-
-~~~
-log_proposal == log_prior
-~~~
-
-and therefore:
-
-~~~
-log_importance_weight = cv_log_pseudo_likelihood
-~~~
-
-up to an additive normalization constant.
-
-## Prediction by Bayesian model averaging
-
-Prediction is Bayesian model averaging.
-
-For classification:
-
-$$
-P(y|x)
-=
-\sum_i
-w_i
-P_i(y|x).
-$$
-
-For regression:
-
-$$
-\hat y
-=
-\sum_i
-w_i
-\hat y_i.
-$$
-
-## Automatic Monte Carlo and convergence
-
-Support:
-
-~~~
-n_estimators="auto"
-~~~
-
-Start with 20 models and double the number of models as follows:
-
-~~~
-20
-40
-80
-160
-320
-...
-~~~
-
-Reuse previously fitted models and only fit newly required models. Require a positive finite `max_estimators`, defaulting to `1280`. If the tolerance is not reached by `max_estimators`, stop and set `converged_ = False`; never loop indefinitely.
-
-Choose a fixed, reproducibly selected convergence subset. For classifiers, compare the averaged class-probability matrices. For regressors, compare the averaged prediction vectors. In both cases compute:
-
-- maximum absolute change;
-- mean absolute change;
-- median absolute change.
-
-Do not use the undefined term “support” as a convergence quantity.
-
-Stop when:
-
-~~~
-difference <= tolerance
-~~~
-
-`difference` is the configured convergence metric, defaulting to maximum absolute change. `tolerance` must be finite and strictly positive.
-
-Store:
-
-- convergence history;
-- number of estimators used;
-- convergence flag.
-
-## Parallelization
-
-Each Monte Carlo draw is completely independent. Derive one deterministic child seed from `(random_state, draw_index)` and use it for that draw. Never share or mutate one RNG across parallel workers; this guarantees identical results for repeated fits with the same seed and stable reuse during automatic estimator growth.
-
-Use joblib.Parallel for:
-
-- model construction;
-- cross-validation;
-- final fitting.
-
-Prediction should also be parallelized across sampled models.
-
-Avoid nested parallelism.
-
-Outer layer:
-
-~~~
-n_jobs=-1
-~~~
-
-Inner k-NN:
-
-~~~
-n_jobs=1
-~~~
-
-## Stored model information
-
-Each sampled model stores:
-
-- family name and family prior probability;
-- the generic sampled parameter mapping;
-- the complete parameter-prior draw and metadata;
-- representation family;
-- representation family probability;
-- projection dimension;
-- projection parameters;
-- subset size;
-- subset indices;
-- beta and cutoff for projection dimension;
-- beta and cutoff for subset size;
-- pseudo-log-likelihood;
-- posterior weight.
-
-Expose:
-
-~~~
-get_model_draws()
-~~~
-
-returning a list of dictionaries.
-
-Also expose:
-
-~~~
-get_model_masses()
-~~~
-
-This aggregates the fitted model weights into a generic family-mass mapping
-that sums to one. Family-specific parameter details remain available in each
-model draw's `parameters` and `parameter_prior` payloads.
-
-The 2D experiment result exposes the same report as `result.model_masses` for
-plotting or tabular diagnostics.
-
-## Public estimator API
-
-Implement:
-
-~~~
-BayesianModelAveragingClassifier
-
-BayesianModelAveragingRegressor
-~~~
-
-The classifier must support:
-
-~~~
-fit()
-
-predict()
-
-predict_proba()
-
-score()
-
-get_model_draws()
-~~~
-
-The regressor supports `fit()`, `predict()`, `score()`, and `get_model_draws()`. It does not expose `predict_proba()`, consistent with the scikit-learn estimator API.
-
-The estimator constructors must expose, validate, and preserve through cloning
-the runtime `family_registry`, `cv`, `alpha`, `epsilon`, `temperature`,
-`n_estimators`, `max_estimators`, `tolerance`, `convergence_metric`, `n_jobs`,
-and `random_state`. Family-specific settings such as `max_neighbors` belong to
-the corresponding adapter.
-
-The implementation must comply with the scikit-learn estimator API and support cloning, pipelines, and GridSearchCV. It must be organized so that new representation modules, priors, convergence criteria, or prediction engines can be added without changing the core Bayesian integration logic.
-
-## Tests
-
-Add unit tests covering:
-
-1. probabilities sum to one;
-2. all probabilities are finite and positive;
-3. the distribution is monotone non-increasing for positive beta;
-4. the same random seed produces the same draw;
-5. a single allowable value is handled correctly;
-6. sampled values always belong to the supplied values;
-7. smaller values are sampled more frequently than larger values over many draws;
-8. projection, subset, and neighbourhood modules all use the same sampler;
-9. no duplicated logistic sampling implementation exists elsewhere;
-10. stored log_probability equals the logarithm of the sampled probability;
-11. sampled `k` never exceeds the smallest CV training-fold size;
-12. invalid subset sizes and class-inadequate subsets fail validation;
-13. classifier fold probabilities align to global classes and remain normalized after smoothing;
-14. regression pseudo-likelihood scores are finite and use training-fold-only variance estimates;
-15. identity projection always returns the original feature dimension;
-16. automatic convergence stops at `max_estimators` when tolerance is not met;
-17. repeated seeded parallel fits produce identical model draws and weights.
-
-Also include statistical tests over many draws showing that the empirical frequency of sampled values approximates the marginal distribution induced by sampling both the logistic slope and cutoff.
-
-## Documentation and extensibility
-
-Document the conceptual role of LogisticScalePrior as a generic prior over ordered scales.
-
-Emphasize that the package has one unified scale-selection principle:
-
-- projection complexity;
-- dataset complexity;
-- prediction locality.
-
-All three are treated as ordered scales and integrated using the same prior mechanism. Alternative prior families should be able to implement the same interface without changing the representation, sampling, scoring, or prediction modules.
+```
+
+Family-specific information belongs inside `parameters` and
+`parameter_prior.metadata`; the core does not require flattened fields such as
+`n_neighbors` or `covariance_structure`.
+
+`get_model_masses()` returns:
+
+```python
+{
+    "family": {"gaussian": ..., "knn": ..., "linear": ...},
+    "parameter": {
+        "gaussian": {"covariance_structure": {...}},
+        "knn": {"n_neighbors": {...}},
+        ...,
+    },
+}
+```
+
+Family masses sum to one. Parameter masses are conditional within each family,
+which makes diagnostics meaningful even when families have different numbers
+of parameter choices.
+
+## Convergence and parallelism
+
+With `n_estimators="auto"`, the ensemble grows as `20, 40, 80, ...` up to
+`max_estimators`. Existing draws are reused. A fixed random subset of the
+training data is used to compare successive ensemble predictions. The selected
+metric is maximum, mean, or median absolute change. The estimator stores:
+
+- `convergence_history_`;
+- `n_estimators_`;
+- `converged_`;
+- `convergence_subset_indices_`.
+
+Every draw receives a deterministic child seed derived from the base seed and
+draw index. This makes serial and parallel fits reproducible and allows
+automatic growth to reuse the same earlier draws. Joblib parallelizes model
+preparation, scoring, final fitting, and prediction; inner estimators such as
+k-NN use `n_jobs=1` to avoid nested parallelism.
+
+## Multiclass visualization
+
+`experiments/classification_2d.py` provides reusable dataset experiments and
+`plot_probability_heatmap`.
+
+- Binary problems retain per-class probability heatmaps with dotted contours
+  at `dotted_threshold` and `1 - dotted_threshold`.
+- Multiclass problems use one panel. Each class has a `tab10` color, and the
+  RGB color is the probability-weighted class-color mixture.
+- Normalized entropy controls saturation: confident class predictions are
+  strongly colored, while uncertain mixtures fade toward white.
+- Black contours show argmax class boundaries; the dotted contour marks
+  confidence `1 - dotted_threshold`.
+- A grayscale confidence colorbar explains the whitening scale.
+
+The notebook is intentionally thin: it runs experiments, prints compact
+diagnostics, and displays the returned figures. Plot parameters, including the
+dotted threshold, remain notebook-configurable.
+
+## Extending the system
+
+To add a family:
+
+1. implement the adapter protocol;
+2. declare supported tasks and representations;
+3. implement the complete conditional parameter prior;
+4. build a fresh sklearn estimator from the sampled parameters;
+5. ensure classification estimators expose `predict_proba`;
+6. register the adapter with `FamilyRegistration`.
+
+No changes to `base.py`, `sampling.py`, `scoring.py`, `models.py`, or the
+public estimator classes should be required. Add tests for task and
+representation validation, deterministic sampling, exact joint prior logging,
+class alignment, scoring, serialization, sklearn cloning, and deterministic
+parallel fitting.
+
+## Verification
+
+Run the development checks with:
+
+```bash
+python -m pytest
+ruff check bayesian_model_averaging tests
+```
+
+The architecture is considered healthy when a custom adapter can be registered
+at runtime and used for classification or regression without modifying the
+Bayesian averaging core.
