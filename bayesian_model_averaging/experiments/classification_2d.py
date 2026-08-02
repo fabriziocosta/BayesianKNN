@@ -86,7 +86,7 @@ class Classification2DResult:
 
     @property
     def model_masses(self) -> dict[str, Any]:
-        """Return posterior mass by model family and family-specific choice."""
+        """Return posterior shares by model family and family-specific choice."""
 
         return self.model.get_model_masses()
 
@@ -449,7 +449,26 @@ def format_convergence_history(result: Classification2DResult) -> str:
     return "\n".join(lines)
 
 
-def format_family_parameter_masses(
+def format_family_draw_frequencies(result: Classification2DResult) -> str:
+    """Format raw family draw counts and their relative frequencies."""
+
+    draws = result.model.get_model_draws()
+    counts = {
+        registration.adapter.name: 0
+        for registration in result.model.family_registry_
+    }
+    for draw in draws:
+        family_name = draw["family_name"]
+        counts[family_name] = counts.get(family_name, 0) + 1
+    total = len(draws)
+    formatted = ", ".join(
+        f"{name}={count / total:.3f} ({count}/{total})"
+        for name, count in sorted(counts.items())
+    )
+    return f"family draw frequencies: {formatted}"
+
+
+def format_family_parameter_shares(
     result: Classification2DResult,
     family_name: str,
     parameter_name: str,
@@ -457,7 +476,7 @@ def format_family_parameter_masses(
     *,
     max_items: int | None = None,
 ) -> str:
-    """Format conditional posterior masses for one sampled parameter."""
+    """Format conditional posterior shares for one sampled parameter."""
 
     values = result.model_masses["parameter"].get(family_name, {}).get(parameter_name, {})
     if not values:
@@ -466,8 +485,8 @@ def format_family_parameter_masses(
     remaining = 0.0
     if max_items is not None and len(items) > max_items:
         items, omitted = items[:max_items], items[max_items:]
-        remaining = sum(mass for _, mass in omitted)
-    formatted = ", ".join(f"{value}={mass:.3f}" for value, mass in items)
+        remaining = sum(share for _, share in omitted)
+    formatted = ", ".join(f"{value}={share:.3f}" for value, share in items)
     if remaining:
         formatted += f", other={remaining:.3f}"
     return f"{label}: {formatted}"

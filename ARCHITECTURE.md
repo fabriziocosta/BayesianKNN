@@ -35,7 +35,7 @@ adapter samples complete parameters
         |
 generic CV score -> fit final estimator -> store ModelDraw
         |
-stable softmax over CV scores -> predictions, masses, convergence
+stable softmax over CV scores -> predictions, posterior shares, convergence
 ```
 
 ## Package layout
@@ -50,7 +50,7 @@ bayesian_model_averaging/
   priors.py            reusable prior objects and draw records
   sampling.py          complete-model sampling, CV subsets, fitting
   scoring.py           generic classification and regression scoring
-  models.py            ModelDraw and posterior-mass diagnostics
+  models.py            ModelDraw and posterior-share diagnostics
   model_families.py    GaussianClassifier implementation
   convergence.py       prediction-change convergence metrics
   utils.py             deterministic seeds and numerical helpers
@@ -391,7 +391,8 @@ Family-specific information belongs inside `parameters` and
 `parameter_prior.metadata`; the core does not require flattened fields such as
 `n_neighbors` or `covariance_structure`.
 
-`get_model_masses()` returns:
+`get_model_masses()` returns posterior shares by family and parameter. The
+method name is retained for API stability:
 
 ```python
 {
@@ -404,7 +405,7 @@ Family-specific information belongs inside `parameters` and
 }
 ```
 
-Family masses sum to one. Parameter masses are conditional within each family,
+Family posterior shares sum to one. Parameter shares are conditional within each family,
 which makes diagnostics meaningful even when families have different numbers
 of parameter choices.
 

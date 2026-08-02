@@ -283,7 +283,7 @@ class BayesianModelAveragingBase(BaseEstimator):
         return [model.to_dict() for model in self._models]
 
     def get_model_masses(self) -> dict[str, Any]:
-        """Return posterior mass by the dynamically registered family names."""
+        """Return posterior shares by the dynamically registered family names."""
 
         check_is_fitted(self, "_models")
         return aggregate_model_masses(self._models)

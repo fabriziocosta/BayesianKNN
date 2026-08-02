@@ -77,9 +77,9 @@ class ModelDraw:
 
 
 def aggregate_model_masses(draws: Sequence[ModelDraw]) -> dict[str, Any]:
-    """Aggregate posterior mass by family and sampled parameter values.
+    """Aggregate posterior shares by family and sampled parameter values.
 
-    Parameter masses are conditional within each family, so the values under
+    Parameter shares are conditional within each family, so the values under
     each family/parameter mapping sum to one. This keeps the diagnostic
     independent of any particular adapter's parameter names.
     """
