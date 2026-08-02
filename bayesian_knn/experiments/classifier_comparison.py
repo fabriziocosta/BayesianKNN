@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
-from sklearn.datasets import load_breast_cancer, load_iris, load_wine
+from sklearn.datasets import load_breast_cancer, load_digits, load_iris, load_wine
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, balanced_accuracy_score, f1_score
 from sklearn.model_selection import train_test_split
@@ -22,6 +22,7 @@ DATASET_LOADERS = {
     "iris": load_iris,
     "wine": load_wine,
     "breast_cancer": load_breast_cancer,
+    "digits": load_digits,
 }
 
 
@@ -165,3 +166,46 @@ def format_comparison_table(results: dict[str, DatasetComparisonResult]) -> str:
                 f"{metrics['balanced_accuracy']:.3f} | {metrics['macro_f1']:.3f} |"
             )
     return "\n".join(lines)
+
+
+def plot_comparison_results(
+    results: dict[str, DatasetComparisonResult],
+    *,
+    metric: str = "accuracy",
+    output_path: str | None = None,
+) -> Any:
+    """Plot grouped classifier scores for each dataset."""
+
+    import matplotlib.pyplot as plt
+
+    valid_metrics = {"accuracy", "balanced_accuracy", "macro_f1"}
+    if metric not in valid_metrics:
+        choices = ", ".join(sorted(valid_metrics))
+        raise ValueError(f"metric must be one of: {choices}")
+    if not results:
+        raise ValueError("results must contain at least one dataset")
+
+    datasets = list(results)
+    classifiers = list(next(iter(results.values())).scores)
+    positions = np.arange(len(datasets))
+    width = 0.8 / len(classifiers)
+    fig, ax = plt.subplots(figsize=(max(10, 2.2 * len(datasets)), 6.5))
+    for index, classifier in enumerate(classifiers):
+        values = [result.scores[classifier][metric] for result in results.values()]
+        bars = ax.bar(
+            positions + (index - (len(classifiers) - 1) / 2) * width,
+            values,
+            width,
+            label=classifier,
+        )
+        ax.bar_label(bars, fmt="%.3f", padding=2, fontsize=8)
+    ax.set_xticks(positions, datasets)
+    ax.set_ylim(0, 1.05)
+    ax.set_ylabel(metric.replace("_", " ").title())
+    ax.set_title("Bayesian k-NN versus standard classifiers")
+    ax.grid(axis="y", alpha=0.25)
+    ax.legend()
+    fig.tight_layout()
+    if output_path is not None:
+        fig.savefig(output_path, dpi=180, bbox_inches="tight")
+    return fig

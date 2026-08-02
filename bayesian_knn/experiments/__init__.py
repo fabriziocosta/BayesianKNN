@@ -9,6 +9,7 @@ from .classifier_comparison import (
     DatasetComparisonResult,
     format_comparison_table,
     load_standard_dataset,
+    plot_comparison_results,
     run_comparison_suite,
     run_dataset_comparison,
 )
@@ -27,6 +28,7 @@ __all__ = [
     "format_convergence_history",
     "load_standard_dataset",
     "make_2d_dataset",
+    "plot_comparison_results",
     "plot_probability_heatmap",
     "run_comparison_suite",
     "run_dataset_comparison",
