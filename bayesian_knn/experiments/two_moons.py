@@ -13,7 +13,6 @@ from sklearn.model_selection import train_test_split
 
 from ..classifier import BayesianKNNClassifier
 
-
 DEFAULT_MODEL_PARAMETERS: dict[str, Any] = {
     "n_estimators": "auto",
     "max_estimators": 640,
