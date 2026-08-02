@@ -57,5 +57,21 @@ def run_and_report(
                 max_items=12,
             )
         )
+        print(
+            format_family_parameter_shares(
+                result,
+                "mlp",
+                "hidden_layer_sizes",
+                "  mlp architecture posterior shares",
+            )
+        )
+        print(
+            format_family_parameter_shares(
+                result,
+                "mlp",
+                "activation",
+                "  mlp activation posterior shares",
+            )
+        )
         print(format_convergence_history(result))
         yield result
