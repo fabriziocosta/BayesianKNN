@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+from scipy.special import logsumexp, ndtr
 from sklearn.datasets import (
     load_iris,
     make_blobs,
@@ -75,6 +76,8 @@ class Classification2DResult:
     test_accuracy: float
     model_weights: np.ndarray
     probability_class: Any
+    bayes_error: float | None
+    bayes_error_kind: str
 
     @property
     def effective_models(self) -> float:
@@ -369,6 +372,174 @@ def make_2d_dataset(
     )
 
 
+def _gaussian_bayes_error_estimate(
+    X: np.ndarray,
+    component_means: np.ndarray,
+    component_covariances: np.ndarray,
+    component_labels: np.ndarray,
+    component_weights: np.ndarray,
+) -> float:
+    """Estimate Bayes error using the generated sample and known densities."""
+
+    log_component_densities = []
+    for mean, covariance, weight in zip(
+        component_means, component_covariances, component_weights
+    ):
+        sign, log_determinant = np.linalg.slogdet(covariance)
+        if sign <= 0:
+            raise ValueError("Gaussian covariance must be positive definite")
+        precision = np.linalg.inv(covariance)
+        residuals = X - mean
+        quadratic = np.einsum("ni,ij,nj->n", residuals, precision, residuals)
+        log_component_densities.append(
+            np.log(weight)
+            - 0.5
+            * (X.shape[1] * np.log(2.0 * np.pi) + log_determinant + quadratic)
+        )
+    log_components = np.column_stack(log_component_densities)
+    log_total = logsumexp(log_components, axis=1)
+    class_log_probabilities = np.column_stack(
+        [
+            logsumexp(
+                log_components[:, component_labels == class_label],
+                axis=1,
+            )
+            for class_label in np.unique(component_labels)
+        ]
+    )
+    posterior = np.exp(class_log_probabilities - log_total[:, None])
+    return float(1.0 - np.mean(np.max(posterior, axis=1)))
+
+
+def _curve_oracle_error(
+    X: np.ndarray,
+    y: np.ndarray,
+    curves: tuple[np.ndarray, ...],
+) -> float:
+    """Classify noisy points by their nearest noiseless generator curve."""
+
+    distances = np.full((len(X), len(curves)), np.inf, dtype=float)
+    for curve_index, curve in enumerate(curves):
+        for start in range(0, len(X), 512):
+            points = X[start : start + 512]
+            squared_distances = np.sum(
+                (points[:, None, :] - curve[None, :, :]) ** 2,
+                axis=2,
+            )
+            distances[start : start + len(points), curve_index] = np.min(
+                squared_distances,
+                axis=1,
+            )
+    predictions = np.argmin(distances, axis=1)
+    return float(np.mean(predictions != y))
+
+
+def bayes_error_for_dataset(
+    dataset: str,
+    X: np.ndarray,
+    y: np.ndarray,
+    parameters: dict[str, Any],
+) -> tuple[float | None, str]:
+    """Return a known or generator-based Bayes-error reference when available.
+
+    The equal-isotropic two-Gaussian generator has a closed-form error. The
+    multi-component Gaussian generators use their known component densities
+    evaluated on the generated sample. Geometric generators use their known
+    noiseless boundary or curves evaluated on the actual noisy sample. Other
+    generators do not currently have a reliable reference error.
+    """
+
+    name = _canonical_dataset(dataset)
+    if name == "gaussian":
+        error = ndtr(
+            -float(parameters["mean_distance"])
+            / (2.0 * float(parameters["standard_deviation"]))
+        )
+        return float(error), "exact"
+
+    if name == "circles":
+        inner_radius = float(parameters["circle_factor"])
+        observed_radius = np.linalg.norm(X, axis=1)
+        predictions = (
+            np.abs(observed_radius - inner_radius)
+            <= np.abs(observed_radius - 1.0)
+        ).astype(int)
+        return float(np.mean(predictions != y)), "generator oracle"
+
+    if name == "checkerboard":
+        cells = int(parameters["checkerboard_cells"])
+        extent = float(parameters["checkerboard_extent"])
+        cell_indices = np.floor((X + extent) / (2.0 * extent) * cells).astype(int)
+        oracle_labels = (cell_indices[:, 0] + cell_indices[:, 1]) % 2
+        return float(np.mean(oracle_labels != y)), "generator oracle"
+
+    if name == "moon":
+        parameter = np.linspace(0.0, np.pi, 2048)
+        outer_curve = np.column_stack((np.cos(parameter), np.sin(parameter)))
+        inner_curve = np.column_stack(
+            (
+                1.0 - np.cos(parameter),
+                1.0 - np.sin(parameter) - 0.5,
+            )
+        )
+        return _curve_oracle_error(X, y, (outer_curve, inner_curve)), "generator oracle"
+
+    if name == "spirals":
+        theta = np.linspace(0.2, 2.0 * np.pi * float(parameters["spiral_turns"]), 2048)
+        radius = np.linspace(0.2, 1.0, 2048)
+        first_curve = np.column_stack((radius * np.cos(theta), radius * np.sin(theta)))
+        second_curve = np.column_stack(
+            (radius * np.cos(theta + np.pi), radius * np.sin(theta + np.pi))
+        )
+        return _curve_oracle_error(X, y, (first_curve, second_curve)), "generator oracle"
+
+    component_means: np.ndarray
+    component_labels: np.ndarray
+    component_weights: np.ndarray
+    if name in {"blobs", "anisotropic_blobs"}:
+        covariance = np.eye(2) * float(parameters["blob_cluster_standard_deviation"]) ** 2
+        n_classes = int(parameters["n_classes"])
+        angles = np.linspace(0.0, 2.0 * np.pi, n_classes, endpoint=False)
+        component_means = float(parameters["blob_center_radius"]) * np.column_stack(
+            (np.cos(angles), np.sin(angles))
+        )
+        component_labels = np.arange(n_classes)
+        component_weights = np.bincount(y, minlength=n_classes).astype(float)
+        component_weights /= component_weights.sum()
+        if name == "anisotropic_blobs":
+            transform_angle = float(parameters["rotation"])
+            rotation_matrix = np.array(
+                [
+                    [np.cos(transform_angle), -np.sin(transform_angle)],
+                    [np.sin(transform_angle), np.cos(transform_angle)],
+                ]
+            )
+            transform = np.diag((float(parameters["anisotropy"]), 1.0)) @ rotation_matrix.T
+            component_means = component_means @ transform
+            covariance = transform.T @ covariance @ transform
+    elif name == "xor":
+        covariance = np.eye(2) * float(parameters["blob_cluster_standard_deviation"]) ** 2
+        component_means = np.array(
+            [(-2.0, -2.0), (-2.0, 2.0), (2.0, -2.0), (2.0, 2.0)]
+        )
+        component_labels = np.array([0, 1, 1, 0])
+        component_weights = np.full(4, 0.25)
+    else:
+        return None, "unavailable"
+
+    covariances = np.repeat(covariance[None, :, :], len(component_means), axis=0)
+    return (
+        _gaussian_bayes_error_estimate(
+            X,
+            component_means,
+            covariances,
+            component_labels,
+            component_weights,
+        ),
+        "density estimate",
+    )
+
+
 def run_2d_classification_experiment(
     dataset: str = "moon",
     *,
@@ -404,6 +575,7 @@ def run_2d_classification_experiment(
         parameters.update(dataset_parameters)
     name = _canonical_dataset(dataset)
     X, y = make_2d_dataset(name, **parameters)
+    bayes_error, bayes_error_kind = bayes_error_for_dataset(name, X, y, parameters)
     X_train, X_test, y_train, y_test = train_test_split(
         X,
         y,
@@ -434,6 +606,8 @@ def run_2d_classification_experiment(
         test_accuracy=float(accuracy_score(y_test, y_pred)),
         model_weights=model_weights,
         probability_class=probability_class,
+        bayes_error=bayes_error,
+        bayes_error_kind=bayes_error_kind,
     )
 
 
@@ -447,6 +621,23 @@ def format_convergence_history(result: Classification2DResult) -> str:
             f"median probability change = {entry['median_absolute_change']:.6f}"
         )
     return "\n".join(lines)
+
+
+def format_error_comparison(result: Classification2DResult) -> str:
+    """Format model error against the available Bayes-error reference."""
+
+    model_error = 1.0 - result.test_accuracy
+    if result.bayes_error is None:
+        return f"test error: {model_error:.3f}; Bayes error: unavailable"
+    if result.bayes_error == 0.0:
+        ratio = "infinite"
+    else:
+        ratio = f"{model_error / result.bayes_error:.2f}"
+    return (
+        f"test error: {model_error:.3f}; "
+        f"Bayes error ({result.bayes_error_kind}): {result.bayes_error:.3f}; "
+        f"model/Bayes error ratio: {ratio}"
+    )
 
 
 def format_family_parameter_shares(

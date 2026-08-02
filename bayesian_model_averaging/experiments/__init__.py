@@ -2,7 +2,9 @@
 
 from .classification_2d import (
     Classification2DResult,
+    bayes_error_for_dataset,
     format_convergence_history,
+    format_error_comparison,
     make_2d_dataset,
     plot_probability_heatmap,
     probability_surface,
@@ -20,8 +22,10 @@ from .classifier_comparison import (
 __all__ = [
     "Classification2DResult",
     "DatasetComparisonResult",
+    "bayes_error_for_dataset",
     "comparison_results_dataframe",
     "format_convergence_history",
+    "format_error_comparison",
     "load_standard_dataset",
     "make_2d_dataset",
     "plot_comparison_results",

@@ -446,6 +446,16 @@ The notebook is intentionally thin: it runs experiments, prints compact
 diagnostics, and displays the returned figures. Plot parameters, including the
 dotted threshold, remain notebook-configurable.
 
+For datasets with a known generating rule, the experiment also reports a
+Bayes-error reference. The equal-isotropic two-Gaussian dataset uses its
+closed-form error; the blobs, anisotropic-blobs, and XOR generators use a
+density-based estimate evaluated on the generated sample; and the moon,
+circles, spirals, and checkerboard generators use their known noiseless
+boundary or curves evaluated on the actual noisy sample. Iris and generic
+sklearn classification data report the reference error as unavailable. The
+report labels each value as exact, density estimate, or generator oracle, and
+includes the model-error/Bayes-error ratio when available.
+
 ## Extending the system
 
 To add a family:

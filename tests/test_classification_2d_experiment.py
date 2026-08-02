@@ -2,6 +2,8 @@ import numpy as np
 import pytest
 
 from bayesian_model_averaging.experiments.classification_2d import (
+    bayes_error_for_dataset,
+    format_error_comparison,
     make_2d_dataset,
     plot_probability_heatmap,
     run_2d_classification_experiment,
@@ -96,6 +98,48 @@ def test_blobs_expose_center_and_spread_controls():
         make_2d_dataset("blobs", n_classes=3, blob_center_radius=0)
     with pytest.raises(ValueError, match="cluster_standard_deviation"):
         make_2d_dataset("blobs", n_classes=3, blob_cluster_standard_deviation=0)
+
+
+def test_bayes_error_is_available_for_gaussian_generators():
+    X, y = make_2d_dataset(
+        "gaussian",
+        n_samples=1000,
+        mean_distance=3.0,
+        standard_deviation=1.0,
+        random_state=4,
+    )
+    error, kind = bayes_error_for_dataset(
+        "gaussian",
+        X,
+        y,
+        {"mean_distance": 3.0, "standard_deviation": 1.0},
+    )
+    assert kind == "exact"
+    assert error == pytest.approx(0.0668072, rel=1e-6)
+
+    blobs_X, blobs_y = make_2d_dataset("blobs", n_samples=100, n_classes=3)
+    error, kind = bayes_error_for_dataset(
+        "blobs",
+        blobs_X,
+        blobs_y,
+        {
+            "n_classes": 3,
+            "blob_center_radius": 3.0,
+            "blob_cluster_standard_deviation": 1.5,
+        },
+    )
+    assert kind == "density estimate"
+    assert error is not None and 0.0 <= error <= 1.0
+
+
+def test_error_comparison_reports_generator_oracle_error():
+    result = run_2d_classification_experiment(
+        "moon",
+        dataset_parameters={"n_samples": 80},
+        test_size=0.25,
+        model_parameters=_small_model_parameters(),
+    )
+    assert "Bayes error (generator oracle):" in format_error_comparison(result)
 
 
 def test_multiclass_plot_uses_one_mixed_probability_panel():
