@@ -33,7 +33,9 @@ Conceptually, the framework shifts machine learning from selecting a single opti
 
 ## Goal and design principles
 
-Implement a production-quality, fully modular, scikit-learn-compatible package implementing a Bayesian Monte Carlo k-nearest-neighbours classifier and regressor.
+This repository provides a production-quality, fully modular,
+scikit-learn-compatible Bayesian Monte Carlo k-nearest-neighbours classifier
+and regressor.
 
 The philosophy of the algorithm is:
 
@@ -124,6 +126,31 @@ bayesian_knn/
     models.py
     utils.py
 ~~~
+
+## Installation and quick start
+
+Install the package and its runtime dependencies with:
+
+~~~bash
+python -m pip install .
+~~~
+
+The estimators use Gaussian random projections, distance-weighted Euclidean
+k-NN, five-fold cross-validation, and automatic Monte Carlo growth by default.
+For a small deterministic run:
+
+~~~python
+from bayesian_knn import BayesianKNNClassifier
+
+model = BayesianKNNClassifier(n_estimators=20, random_state=7, n_jobs=-1)
+model.fit(X_train, y_train)
+probabilities = model.predict_proba(X_test)
+predictions = model.predict(X_test)
+~~~
+
+`BayesianKNNRegressor` exposes the corresponding `fit`, `predict`, `score`,
+and `get_model_draws` methods. It intentionally does not expose
+`predict_proba`.
 
 ## Unified logistic scale prior
 

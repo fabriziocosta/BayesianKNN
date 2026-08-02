@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 from scipy.special import gammaln, logsumexp
@@ -12,7 +13,7 @@ from sklearn.model_selection import KFold, StratifiedKFold
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 
 from .models import ModelDraw
-from .priors import LogisticScalePrior, ScalePriorDraw
+from .priors import LogisticScalePrior
 from .representation import make_representation
 from .scoring import classification_cv_score, regression_cv_score
 
@@ -88,7 +89,9 @@ def sample_subset(
         rng.choice(indices, size=int(count), replace=False)
         for indices, count in zip(class_indices, counts)
     ]
-    return SubsetSample(indices=np.sort(np.concatenate(selected)).astype(int), log_probability=-log_total)
+    return SubsetSample(
+        indices=np.sort(np.concatenate(selected)).astype(int), log_probability=-log_total
+    )
 
 
 def _sample_class_counts(

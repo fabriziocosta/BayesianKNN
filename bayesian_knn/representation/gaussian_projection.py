@@ -20,7 +20,7 @@ class GaussianProjection(BaseRepresentation):
             random_state=self.random_state,
         )
 
-    def fit(self, X: Any) -> "GaussianProjection":
+    def fit(self, X: Any) -> GaussianProjection:
         self._projection.fit(X)
         return self
 

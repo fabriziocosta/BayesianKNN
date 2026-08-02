@@ -15,7 +15,7 @@ class BayesianKNNRegressor(RegressorMixin, BayesianKNNBase):
 
     _estimator_type = "regressor"
 
-    def fit(self, X: Any, y: Any) -> "BayesianKNNRegressor":
+    def fit(self, X: Any, y: Any) -> BayesianKNNRegressor:
         self._fit_task(X, y, "regression")
         return self
 

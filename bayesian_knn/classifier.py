@@ -15,7 +15,7 @@ class BayesianKNNClassifier(ClassifierMixin, BayesianKNNBase):
 
     _estimator_type = "classifier"
 
-    def fit(self, X: Any, y: Any) -> "BayesianKNNClassifier":
+    def fit(self, X: Any, y: Any) -> BayesianKNNClassifier:
         self._fit_task(X, y, "classification")
         return self
 

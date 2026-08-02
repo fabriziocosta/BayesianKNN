@@ -5,8 +5,6 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-import numpy as np
-
 
 class BaseRepresentation(ABC):
     """Small interface shared by all representation families."""
@@ -14,7 +12,7 @@ class BaseRepresentation(ABC):
     family: str
 
     @abstractmethod
-    def fit(self, X: Any) -> "BaseRepresentation":
+    def fit(self, X: Any) -> BaseRepresentation:
         raise NotImplementedError
 
     @abstractmethod

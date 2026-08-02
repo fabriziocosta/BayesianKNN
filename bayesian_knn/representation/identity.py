@@ -10,7 +10,7 @@ from .base import BaseRepresentation
 class IdentityRepresentation(BaseRepresentation):
     family = "identity"
 
-    def fit(self, X: Any) -> "IdentityRepresentation":
+    def fit(self, X: Any) -> IdentityRepresentation:
         if getattr(X, "ndim", 2) != 2:
             raise ValueError("X must be two-dimensional")
         self.n_features_in_ = int(X.shape[1])

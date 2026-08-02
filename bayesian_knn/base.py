@@ -7,7 +7,8 @@ from typing import Any
 import numpy as np
 from joblib import Parallel, delayed
 from sklearn.base import BaseEstimator
-from sklearn.utils import check_X_y, check_array, check_is_fitted
+from sklearn.utils import check_array, check_X_y
+from sklearn.utils.validation import check_is_fitted
 
 from .convergence import compare_predictions, convergence_difference
 from .models import ModelDraw
@@ -99,7 +100,7 @@ class BayesianKNNBase(BaseEstimator):
         if self.max_neighbors is not None and int(self.max_neighbors) < 1:
             raise ValueError("max_neighbors must be positive")
 
-    def _fit_task(self, X: Any, y: Any, task: str) -> "BayesianKNNBase":
+    def _fit_task(self, X: Any, y: Any, task: str) -> BayesianKNNBase:
         self._validate_parameters()
         X, y = check_X_y(X, y, accept_sparse=True, ensure_2d=True, y_numeric=task == "regression")
         if task == "regression":
@@ -183,9 +184,15 @@ class BayesianKNNBase(BaseEstimator):
             min_subset_size=(
                 int(self.min_subset_size)
                 if self.min_subset_size is not None
-                else (n_splits_for_cv(self.cv) if self._task == "regression" else n_splits_for_cv(self.cv) * len(self.classes_))
+                else (
+                    n_splits_for_cv(self.cv)
+                    if self._task == "regression"
+                    else n_splits_for_cv(self.cv) * len(self.classes_)
+                )
             ),
-            max_subset_size=int(self.max_subset_size) if self.max_subset_size is not None else len(y),
+            max_subset_size=(
+                int(self.max_subset_size) if self.max_subset_size is not None else len(y)
+            ),
             max_neighbors=self.max_neighbors,
             weights=self.weights,
             metric=self.metric,

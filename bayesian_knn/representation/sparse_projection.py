@@ -20,7 +20,7 @@ class SparseProjection(BaseRepresentation):
             random_state=self.random_state,
         )
 
-    def fit(self, X: Any) -> "SparseProjection":
+    def fit(self, X: Any) -> SparseProjection:
         self._projection.fit(X)
         return self
 
