@@ -722,7 +722,7 @@ def default_family_registry() -> tuple[FamilyRegistration, ...]:
         FamilyRegistration(adapter, prior_weight=1.0)
         for adapter in (
             KNNAdapter(),
-            LinearAdapter(),
+            LinearMixtureAdapter(),
             GaussianMixtureAdapter(),
             MLPAdapter(),
             DecisionTreeAdapter(),

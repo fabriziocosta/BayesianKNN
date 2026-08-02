@@ -206,7 +206,7 @@ def test_default_registry_contains_built_in_families(data):
         random_state=7,
     ).fit(X, y)
     names = {draw["family_name"] for draw in estimator.get_model_draws()}
-    assert names == {"knn", "linear", "gaussian_mixture", "mlp", "decision_tree"}
+    assert names == {"knn", "linear_mixture", "gaussian_mixture", "mlp", "decision_tree"}
     assert all(
         draw["family_prior_probability"] == pytest.approx(1 / 5)
         for draw in estimator.get_model_draws()

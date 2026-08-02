@@ -131,7 +131,7 @@ class FamilyRegistration:
 registry normalizes positive weights to sum to one, rejects duplicate names,
 and filters families that do not support the requested task. A one-entry
 registry is therefore a fixed-family ensemble. If `family_registry` is not
-specified, the default is a uniform mixture of k-NN, linear, Gaussian-mixture, MLP, and
+specified, the default is a uniform mixture of k-NN, gated linear-mixture, Gaussian-mixture, MLP, and
 decision-tree families.
 
 ### Adapter responsibilities
@@ -406,7 +406,7 @@ method name is retained for API stability:
 
 ```python
 {
-    "family": {"gaussian_mixture": ..., "knn": ..., "linear": ..., "mlp": ..., "decision_tree": ...},
+    "family": {"gaussian_mixture": ..., "knn": ..., "linear_mixture": ..., "mlp": ..., "decision_tree": ...},
     "parameter": {
         "gaussian_mixture": {
             "covariance_structure": {...},
