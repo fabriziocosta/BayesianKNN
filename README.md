@@ -53,6 +53,9 @@ model = BayesianModelAveragingClassifier(
 
 The full design and implementation documentation is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
+For a minimal end-to-end example, see
+[`notebooks/simple_library_usage.ipynb`](notebooks/simple_library_usage.ipynb).
+
 For development:
 
 ```bash
