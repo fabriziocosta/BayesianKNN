@@ -35,6 +35,18 @@ def test_supported_2d_dataset_shapes_and_labels():
     assert np.array_equal(np.unique(gaussian_y), [0, 1])
     assert np.array_equal(np.unique(blobs_y), [0, 1, 2, 3])
 
+    for dataset in (
+        "circles",
+        "xor",
+        "spirals",
+        "anisotropic_blobs",
+        "checkerboard",
+        "classification",
+    ):
+        X, y = make_2d_dataset(dataset, n_samples=120)
+        assert X.shape == (120, 2)
+        assert len(np.unique(y)) >= 2
+
 
 def test_each_supported_dataset_can_run_through_the_generic_experiment():
     for dataset, parameters in (
@@ -42,6 +54,12 @@ def test_each_supported_dataset_can_run_through_the_generic_experiment():
         ("iris", {"feature_indices": (2, 3)}),
         ("gaussian", {"n_samples": 80}),
         ("blobs", {"n_samples": 80, "n_classes": 4}),
+        ("circles", {"n_samples": 80}),
+        ("xor", {"n_samples": 80}),
+        ("spirals", {"n_samples": 80}),
+        ("anisotropic_blobs", {"n_samples": 80}),
+        ("checkerboard", {"n_samples": 80}),
+        ("classification", {"n_samples": 80}),
     ):
         result = run_2d_classification_experiment(
             dataset,

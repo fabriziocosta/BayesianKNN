@@ -7,7 +7,15 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from sklearn.datasets import load_iris, make_blobs, make_moons
+from sklearn.datasets import (
+    load_iris,
+    make_blobs,
+    make_circles,
+    make_moons,
+)
+from sklearn.datasets import (
+    make_classification as sklearn_make_classification,
+)
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 
@@ -39,6 +47,17 @@ DATASET_ALIASES = {
     "blob": "blobs",
     "blobs": "blobs",
     "gaussian_blobs": "blobs",
+    "circle": "circles",
+    "circles": "circles",
+    "xor": "xor",
+    "spiral": "spirals",
+    "spirals": "spirals",
+    "anisotropic": "anisotropic_blobs",
+    "anisotropic_blobs": "anisotropic_blobs",
+    "checker": "checkerboard",
+    "checkerboard": "checkerboard",
+    "classification": "classification",
+    "make_classification": "classification",
 }
 
 
@@ -72,7 +91,22 @@ def _canonical_dataset(dataset: str) -> str:
     try:
         return DATASET_ALIASES[dataset.lower()]
     except (AttributeError, KeyError) as error:
-        choices = ", ".join(sorted({"moon", "iris", "gaussian", "blobs"}))
+        choices = ", ".join(
+            sorted(
+                {
+                    "moon",
+                    "iris",
+                    "gaussian",
+                    "blobs",
+                    "circles",
+                    "xor",
+                    "spirals",
+                    "anisotropic_blobs",
+                    "checkerboard",
+                    "classification",
+                }
+            )
+        )
         raise ValueError(f"dataset must be one of: {choices}") from error
 
 
@@ -129,6 +163,96 @@ def _make_blobs(
     )
 
 
+def _make_xor(
+    n_samples: int,
+    cluster_standard_deviation: float,
+    random_state: int | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    if cluster_standard_deviation <= 0:
+        raise ValueError("cluster_standard_deviation must be positive")
+    centers = np.array([(-2.0, -2.0), (-2.0, 2.0), (2.0, -2.0), (2.0, 2.0)])
+    X, cluster_labels = make_blobs(
+        n_samples=n_samples,
+        centers=centers,
+        cluster_std=cluster_standard_deviation,
+        random_state=random_state,
+    )
+    return X, np.asarray([0, 1, 1, 0])[cluster_labels]
+
+
+def _make_spirals(
+    n_samples: int,
+    turns: float,
+    noise: float,
+    random_state: int | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    if turns <= 0:
+        raise ValueError("spiral_turns must be positive")
+    if noise < 0:
+        raise ValueError("spiral_noise must be non-negative")
+    rng = np.random.default_rng(random_state)
+    counts = (n_samples // 2, n_samples - n_samples // 2)
+    theta = np.linspace(0.2, 2.0 * np.pi * turns, counts[0])
+    radius = np.linspace(0.2, 1.0, counts[0])
+    first = np.column_stack((radius * np.cos(theta), radius * np.sin(theta)))
+    second = np.column_stack(
+        (radius * np.cos(theta + np.pi), radius * np.sin(theta + np.pi))
+    )
+    X = np.vstack((first, second))
+    X += rng.normal(scale=noise, size=X.shape)
+    y = np.repeat((0, 1), counts)
+    order = rng.permutation(n_samples)
+    return X[order], y[order]
+
+
+def _make_checkerboard(
+    n_samples: int,
+    cells: int,
+    extent: float,
+    label_noise: float,
+    random_state: int | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    if not isinstance(cells, (int, np.integer)) or isinstance(cells, bool) or cells < 2:
+        raise ValueError("checkerboard_cells must be an integer of at least 2")
+    if extent <= 0:
+        raise ValueError("checkerboard_extent must be positive")
+    if not 0 <= label_noise <= 1:
+        raise ValueError("checkerboard_label_noise must be between 0 and 1")
+    rng = np.random.default_rng(random_state)
+    X = rng.uniform(-extent, extent, size=(n_samples, 2))
+    cell_indices = np.floor((X + extent) / (2.0 * extent) * cells).astype(int)
+    y = (cell_indices[:, 0] + cell_indices[:, 1]) % 2
+    flips = rng.random(n_samples) < label_noise
+    return X, np.where(flips, 1 - y, y)
+
+
+def _make_classification_data(
+    n_samples: int,
+    n_classes: int,
+    class_sep: float,
+    flip_y: float,
+    random_state: int | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    if n_classes < 2:
+        raise ValueError("n_classes must be at least 2")
+    if not 0 <= flip_y <= 1:
+        raise ValueError("classification_flip_y must be between 0 and 1")
+    if class_sep <= 0:
+        raise ValueError("classification_class_sep must be positive")
+    return sklearn_make_classification(
+        n_samples=n_samples,
+        n_features=2,
+        n_informative=2,
+        n_redundant=0,
+        n_repeated=0,
+        n_classes=n_classes,
+        n_clusters_per_class=1,
+        class_sep=class_sep,
+        flip_y=flip_y,
+        random_state=random_state,
+    )
+
+
 def make_2d_dataset(
     dataset: str = "moon",
     *,
@@ -141,6 +265,16 @@ def make_2d_dataset(
     n_classes: int = 3,
     blob_center_radius: float = 3.0,
     blob_cluster_standard_deviation: float = 1.5,
+    circle_factor: float = 0.5,
+    spiral_turns: float = 1.5,
+    spiral_noise: float = 0.12,
+    checkerboard_cells: int = 4,
+    checkerboard_extent: float = 4.0,
+    checkerboard_label_noise: float = 0.0,
+    anisotropy: float = 3.0,
+    rotation: float = 0.35,
+    classification_class_sep: float = 1.0,
+    classification_flip_y: float = 0.05,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Create one of the supported two-dimensional classification datasets.
 
@@ -152,6 +286,15 @@ def make_2d_dataset(
     name = _canonical_dataset(dataset)
     if name == "moon":
         return make_moons(n_samples=n_samples, noise=noise, random_state=random_state)
+    if name == "circles":
+        if not 0 < circle_factor < 1:
+            raise ValueError("circle_factor must be between 0 and 1")
+        return make_circles(
+            n_samples=n_samples,
+            noise=noise,
+            factor=circle_factor,
+            random_state=random_state,
+        )
     if name == "iris":
         iris = load_iris()
         if len(feature_indices) != 2 or len(set(feature_indices)) != 2:
@@ -167,6 +310,53 @@ def make_2d_dataset(
             cluster_standard_deviation=blob_cluster_standard_deviation,
             random_state=random_state,
         )
+    if name == "xor":
+        return _make_xor(
+            n_samples=n_samples,
+            cluster_standard_deviation=blob_cluster_standard_deviation,
+            random_state=random_state,
+        )
+    if name == "spirals":
+        return _make_spirals(
+            n_samples=n_samples,
+            turns=spiral_turns,
+            noise=spiral_noise,
+            random_state=random_state,
+        )
+    if name == "checkerboard":
+        return _make_checkerboard(
+            n_samples=n_samples,
+            cells=checkerboard_cells,
+            extent=checkerboard_extent,
+            label_noise=checkerboard_label_noise,
+            random_state=random_state,
+        )
+    if name == "classification":
+        return _make_classification_data(
+            n_samples=n_samples,
+            n_classes=n_classes,
+            class_sep=classification_class_sep,
+            flip_y=classification_flip_y,
+            random_state=random_state,
+        )
+    if name == "anisotropic_blobs":
+        X, y = _make_blobs(
+            n_samples=n_samples,
+            n_classes=n_classes,
+            center_radius=blob_center_radius,
+            cluster_standard_deviation=blob_cluster_standard_deviation,
+            random_state=random_state,
+        )
+        if anisotropy <= 0:
+            raise ValueError("anisotropy must be positive")
+        transform_angle = float(rotation)
+        rotation_matrix = np.array(
+            [
+                [np.cos(transform_angle), -np.sin(transform_angle)],
+                [np.sin(transform_angle), np.cos(transform_angle)],
+            ]
+        )
+        return X @ np.diag((anisotropy, 1.0)) @ rotation_matrix.T, y
     return _make_equal_isotropic_gaussians(
         n_samples=n_samples,
         mean_distance=mean_distance,
@@ -195,6 +385,16 @@ def run_2d_classification_experiment(
         "n_classes": 3,
         "blob_center_radius": 3.0,
         "blob_cluster_standard_deviation": 1.5,
+        "circle_factor": 0.5,
+        "spiral_turns": 1.5,
+        "spiral_noise": 0.12,
+        "checkerboard_cells": 4,
+        "checkerboard_extent": 4.0,
+        "checkerboard_label_noise": 0.0,
+        "anisotropy": 3.0,
+        "rotation": 0.35,
+        "classification_class_sep": 1.0,
+        "classification_flip_y": 0.05,
     }
     if dataset_parameters is not None:
         parameters.update(dataset_parameters)
