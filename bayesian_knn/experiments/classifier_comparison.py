@@ -28,7 +28,12 @@ DATASET_LOADERS = {
 
 @dataclass
 class DatasetComparisonResult:
-    """Evaluation results for one dataset and four classifiers."""
+    """Repeated evaluation results for one dataset and four classifiers.
+
+    ``scores`` contains the mean metric across repeats and ``score_stds``
+    contains the corresponding sample standard deviations. ``score_runs``
+    retains the individual metric values for further analysis.
+    """
 
     dataset: str
     X_train: np.ndarray
@@ -37,6 +42,8 @@ class DatasetComparisonResult:
     y_test: np.ndarray
     models: dict[str, Any]
     scores: dict[str, dict[str, float]]
+    score_stds: dict[str, dict[str, float]]
+    score_runs: dict[str, dict[str, tuple[float, ...]]]
 
 
 def load_standard_dataset(dataset: str) -> tuple[np.ndarray, np.ndarray]:
@@ -98,45 +105,86 @@ def run_dataset_comparison(
     *,
     test_size: float = 0.25,
     random_state: int = 7,
+    n_repeats: int = 1,
     n_neighbors: int = 15,
     bayesian_parameters: dict[str, Any] | None = None,
     random_forest_parameters: dict[str, Any] | None = None,
     svm_parameters: dict[str, Any] | None = None,
 ) -> DatasetComparisonResult:
-    """Fit and evaluate four classifiers on one standard dataset."""
+    """Fit and evaluate four classifiers over repeated train/test splits.
+
+    The reported scores are means over ``n_repeats`` stratified holdout
+    splits. Standard deviations use ``ddof=1`` and are zero for one repeat.
+    """
+
+    if not isinstance(n_repeats, (int, np.integer)) or n_repeats < 1:
+        raise ValueError("n_repeats must be a positive integer")
 
     X, y = load_standard_dataset(dataset)
-    X_train, X_test, y_train, y_test = train_test_split(
-        X,
-        y,
-        test_size=test_size,
-        stratify=y,
-        random_state=random_state,
+    seeds = np.random.SeedSequence(random_state).generate_state(
+        int(n_repeats), dtype=np.uint32
     )
-    models = _make_models(
-        bayesian_parameters=bayesian_parameters,
-        n_neighbors=n_neighbors,
-        random_state=random_state,
-        random_forest_parameters=random_forest_parameters,
-        svm_parameters=svm_parameters,
-    )
-    scores: dict[str, dict[str, float]] = {}
-    for name, model in models.items():
-        model.fit(X_train, y_train)
-        predictions = model.predict(X_test)
-        scores[name] = {
-            "accuracy": float(accuracy_score(y_test, predictions)),
-            "balanced_accuracy": float(balanced_accuracy_score(y_test, predictions)),
-            "macro_f1": float(f1_score(y_test, predictions, average="macro")),
+    models: dict[str, Any] = {}
+    X_train = X_test = y_train = y_test = None
+    score_values: dict[str, dict[str, list[float]]] = {}
+    for repeat_seed in seeds:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X,
+            y,
+            test_size=test_size,
+            stratify=y,
+            random_state=int(repeat_seed),
+        )
+        models = _make_models(
+            bayesian_parameters=bayesian_parameters,
+            n_neighbors=n_neighbors,
+            random_state=int(repeat_seed),
+            random_forest_parameters=random_forest_parameters,
+            svm_parameters=svm_parameters,
+        )
+        for name, model in models.items():
+            model.fit(X_train, y_train)
+            predictions = model.predict(X_test)
+            metrics = {
+                "accuracy": float(accuracy_score(y_test, predictions)),
+                "balanced_accuracy": float(balanced_accuracy_score(y_test, predictions)),
+                "macro_f1": float(f1_score(y_test, predictions, average="macro")),
+            }
+            if name not in score_values:
+                score_values[name] = {metric: [] for metric in metrics}
+            for metric, value in metrics.items():
+                score_values[name][metric].append(value)
+
+    scores = {
+        name: {
+            metric: float(np.mean(values))
+            for metric, values in metrics.items()
         }
+        for name, metrics in score_values.items()
+    }
+    score_stds = {
+        name: {
+            metric: float(np.std(values, ddof=1)) if len(values) > 1 else 0.0
+            for metric, values in metrics.items()
+        }
+        for name, metrics in score_values.items()
+    }
+    score_runs = {
+        name: {metric: tuple(values) for metric, values in metrics.items()}
+        for name, metrics in score_values.items()
+    }
     return DatasetComparisonResult(
         dataset=dataset.lower(),
+        # These are the final repeat's split and fitted models, retained for
+        # interactive inspection while aggregate metrics cover all repeats.
         X_train=X_train,
         X_test=X_test,
         y_train=y_train,
         y_test=y_test,
         models=models,
         scores=scores,
+        score_stds=score_stds,
+        score_runs=score_runs,
     )
 
 
@@ -156,15 +204,18 @@ def format_comparison_table(results: dict[str, DatasetComparisonResult]) -> str:
     """Format comparison results as a compact Markdown table."""
 
     lines = [
-        "| Dataset | Classifier | Accuracy | Balanced accuracy | Macro-F1 |",
+        "| Dataset | Classifier | Accuracy (mean ± std) | "
+        "Balanced accuracy (mean ± std) | Macro-F1 (mean ± std) |",
         "| --- | --- | ---: | ---: | ---: |",
     ]
     for dataset, result in results.items():
         for classifier, metrics in result.scores.items():
-            lines.append(
-                f"| {dataset} | {classifier} | {metrics['accuracy']:.3f} | "
-                f"{metrics['balanced_accuracy']:.3f} | {metrics['macro_f1']:.3f} |"
-            )
+            stds = result.score_stds[classifier]
+            formatted = [
+                f"{metrics[metric]:.3f} ± {stds[metric]:.3f}"
+                for metric in ("accuracy", "balanced_accuracy", "macro_f1")
+            ]
+            lines.append(f"| {dataset} | {classifier} | {' | '.join(formatted)} |")
     return "\n".join(lines)
 
 
@@ -174,7 +225,7 @@ def plot_comparison_results(
     metric: str = "accuracy",
     output_path: str | None = None,
 ) -> Any:
-    """Plot grouped classifier scores for each dataset."""
+    """Plot mean grouped classifier scores with repeat standard deviations."""
 
     import matplotlib.pyplot as plt
 
@@ -190,17 +241,31 @@ def plot_comparison_results(
     positions = np.arange(len(datasets))
     width = 0.8 / len(classifiers)
     fig, ax = plt.subplots(figsize=(max(10, 2.2 * len(datasets)), 6.5))
+    upper_bound = 1.05
     for index, classifier in enumerate(classifiers):
         values = [result.scores[classifier][metric] for result in results.values()]
+        standard_deviations = [
+            result.score_stds[classifier][metric] for result in results.values()
+        ]
+        upper_bound = max(
+            upper_bound,
+            *(
+                value + standard_deviation
+                for value, standard_deviation in zip(values, standard_deviations)
+            ),
+        )
         bars = ax.bar(
             positions + (index - (len(classifiers) - 1) / 2) * width,
             values,
             width,
+            yerr=standard_deviations,
+            capsize=4,
+            error_kw={"elinewidth": 1, "capthick": 1},
             label=classifier,
         )
         ax.bar_label(bars, fmt="%.3f", padding=2, fontsize=8)
     ax.set_xticks(positions, datasets)
-    ax.set_ylim(0, 1.05)
+    ax.set_ylim(0, max(1.05, 1.08 * upper_bound))
     ax.set_ylabel(metric.replace("_", " ").title())
     ax.set_title("Bayesian k-NN versus standard classifiers")
     ax.grid(axis="y", alpha=0.25)
