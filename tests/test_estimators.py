@@ -11,6 +11,7 @@ from sklearn.tree import DecisionTreeClassifier
 from bayesian_model_averaging import (
     BayesianModelAveragingClassifier,
     BayesianModelAveragingRegressor,
+    DecisionTreeAdapter,
     FamilyRegistration,
     GaussianAdapter,
     KNNAdapter,
@@ -233,6 +234,31 @@ def test_mlp_adapter_supports_regression(data):
         **{**estimator_kwargs(MLPAdapter()), "n_estimators": 1}
     ).fit(X, y)
     assert estimator.predict(X[:3]).shape == (3,)
+
+
+def test_decision_tree_adapter_supports_classification_and_regression(data):
+    X, y, y_reg = data
+    classifier = BayesianModelAveragingClassifier(
+        **{**estimator_kwargs(DecisionTreeAdapter()), "n_estimators": 3}
+    ).fit(X, y)
+    classifier_draws = classifier.get_model_draws()
+    assert all(draw["family_name"] == "decision_tree" for draw in classifier_draws)
+    assert all(
+        draw["parameters"]["criterion"] in {"gini", "entropy"}
+        for draw in classifier_draws
+    )
+    assert classifier.predict_proba(X[:3]).shape == (3, 3)
+
+    regressor = BayesianModelAveragingRegressor(
+        **{**estimator_kwargs(DecisionTreeAdapter()), "n_estimators": 3}
+    ).fit(X, y_reg)
+    regression_draws = regressor.get_model_draws()
+    assert all(draw["family_name"] == "decision_tree" for draw in regression_draws)
+    assert all(
+        draw["parameters"]["criterion"] == "squared_error"
+        for draw in regression_draws
+    )
+    assert regressor.predict(X[:3]).shape == (3,)
 
 
 class ToyClassifierAdapter(BaseEstimator):

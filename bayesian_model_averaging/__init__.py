@@ -1,6 +1,7 @@
 """Bayesian model averaging with runtime estimator-family adapters."""
 
 from .adapters import (
+    DecisionTreeAdapter,
     EstimatorFamilyAdapter,
     FamilyRegistration,
     GaussianAdapter,
@@ -28,6 +29,7 @@ __all__ = [
     "BayesianModelAveragingClassifier",
     "BayesianModelAveragingRegressor",
     "CategoricalPrior",
+    "DecisionTreeAdapter",
     "EstimatorFamilyAdapter",
     "FamilyRegistration",
     "GaussianAdapter",

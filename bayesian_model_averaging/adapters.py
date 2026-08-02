@@ -11,6 +11,7 @@ from sklearn.base import BaseEstimator
 from sklearn.linear_model import BayesianRidge, LogisticRegression, Ridge
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.neural_network import MLPClassifier, MLPRegressor
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
 from .model_families import GaussianClassifier
 from .priors import (
@@ -166,6 +167,145 @@ class KNNAdapter(BaseEstimator):
         # The neighbourhood size already determines the k-NN probability
         # vector. Do not use it a second time as cross-family confidence;
         # that would make k-NN scores incomparable with other classifiers.
+        return 1.0
+
+
+class DecisionTreeAdapter(BaseEstimator):
+    """Adapter for decision-tree classifiers and regressors."""
+
+    name = "decision_tree"
+    supported_tasks = frozenset({"classification", "regression"})
+    supported_representations = frozenset({"identity", "gaussian", "sparse"})
+
+    def __init__(
+        self,
+        max_depth_values: Sequence[int | None] = (1, 2, 3, 4, 6, 8, None),
+        min_samples_leaf_values: Sequence[int] = (1, 2, 4, 8, 16),
+        min_samples_split_values: Sequence[int] = (2, 4, 8, 16, 32),
+        simplicity: float = 1.0,
+    ) -> None:
+        self.max_depth_values = tuple(max_depth_values)
+        self.min_samples_leaf_values = tuple(min_samples_leaf_values)
+        self.min_samples_split_values = tuple(min_samples_split_values)
+        self.simplicity = simplicity
+
+    def sample_parameters(
+        self,
+        context: SamplingContext,
+        rng: np.random.Generator,
+    ) -> ParameterDraw:
+        depth_complexities = [
+            2**int(depth) if depth is not None else 2 ** (context.n_features + 3)
+            for depth in self.max_depth_values
+        ]
+        depth_prior = SimplicityCategoricalPrior(
+            self.max_depth_values,
+            depth_complexities,
+            simplicity=float(self.simplicity),
+        )
+        max_depth, depth_log_probability, depth_metadata = depth_prior.draw(rng)
+
+        leaf_values = tuple(
+            value
+            for value in self.min_samples_leaf_values
+            if isinstance(value, (int, np.integer))
+            and not isinstance(value, (bool, np.bool_))
+            and 1 <= int(value) <= context.subset_size
+        )
+        if not leaf_values:
+            raise ValueError("no valid min_samples_leaf choices for the sampled subset")
+        leaf_prior = SimplicityCategoricalPrior(
+            leaf_values,
+            leaf_values,
+            simplicity=float(self.simplicity),
+        )
+        min_samples_leaf, leaf_log_probability, leaf_metadata = leaf_prior.draw(rng)
+
+        split_values = tuple(
+            value
+            for value in self.min_samples_split_values
+            if isinstance(value, (int, np.integer))
+            and not isinstance(value, (bool, np.bool_))
+            and 2 <= int(value) <= context.subset_size
+        )
+        if not split_values:
+            raise ValueError("no valid min_samples_split choices for the sampled subset")
+        split_prior = SimplicityCategoricalPrior(
+            split_values,
+            split_values,
+            simplicity=float(self.simplicity),
+        )
+        min_samples_split, split_log_probability, split_metadata = split_prior.draw(rng)
+
+        criterion_values = (
+            ("gini", "entropy")
+            if context.task == "classification"
+            else ("squared_error",)
+        )
+        criterion, criterion_log_probability, criterion_metadata = CategoricalPrior(
+            criterion_values
+        ).draw(rng)
+        splitter, splitter_log_probability, splitter_metadata = CategoricalPrior(
+            ("best", "random")
+        ).draw(rng)
+
+        return ParameterDraw(
+            parameters={
+                "max_depth": None if max_depth is None else int(max_depth),
+                "min_samples_leaf": int(min_samples_leaf),
+                "min_samples_split": int(min_samples_split),
+                "criterion": str(criterion),
+                "splitter": str(splitter),
+            },
+            log_probability=float(
+                depth_log_probability
+                + leaf_log_probability
+                + split_log_probability
+                + criterion_log_probability
+                + splitter_log_probability
+            ),
+            metadata={
+                "max_depth": _categorical_metadata(
+                    max_depth, depth_log_probability, depth_metadata
+                ),
+                "min_samples_leaf": _categorical_metadata(
+                    min_samples_leaf, leaf_log_probability, leaf_metadata
+                ),
+                "min_samples_split": _categorical_metadata(
+                    min_samples_split, split_log_probability, split_metadata
+                ),
+                "criterion": _categorical_metadata(
+                    criterion, criterion_log_probability, criterion_metadata
+                ),
+                "splitter": _categorical_metadata(
+                    splitter, splitter_log_probability, splitter_metadata
+                ),
+            },
+        )
+
+    def build_estimator(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+        random_state: int,
+    ) -> BaseEstimator:
+        estimator_class = (
+            DecisionTreeClassifier if task == "classification" else DecisionTreeRegressor
+        )
+        return estimator_class(
+            max_depth=parameters["max_depth"],
+            min_samples_leaf=int(parameters["min_samples_leaf"]),
+            min_samples_split=int(parameters["min_samples_split"]),
+            criterion=str(parameters["criterion"]),
+            splitter=str(parameters["splitter"]),
+            random_state=random_state,
+        )
+
+    def predictive_concentration(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+    ) -> float:
         return 1.0
 
 

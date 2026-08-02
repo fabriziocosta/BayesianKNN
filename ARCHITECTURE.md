@@ -165,6 +165,7 @@ override `predictive_concentration`, but the value must be positive and finite.
 | `LinearAdapter` | `LogisticRegression` | `Ridge` | identity, Gaussian projection, sparse projection | solver/iterations or ridge `alpha` |
 | `GaussianAdapter` | `GaussianClassifier` | `BayesianRidge` | identity, Gaussian projection, sparse projection | classification covariance structure |
 | `MLPAdapter` | `MLPClassifier` | `MLPRegressor` | identity | architecture, activation, regularization, learning rate |
+| `DecisionTreeAdapter` | `DecisionTreeClassifier` | `DecisionTreeRegressor` | identity, Gaussian projection, sparse projection | depth, split/leaf sizes, criterion, splitter |
 
 The Gaussian classifier fits a separate Gaussian likelihood for every class.
 Its sampled covariance structure is one of `isotropic`, `diagonal`, or `full`.
