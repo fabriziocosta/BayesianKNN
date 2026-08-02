@@ -23,8 +23,9 @@ are explicitly represented:
 Rather than fixing any of these quantities, they are treated as latent random variables and sampled from common probabilistic priors. A single reusable scale-prior mechanism governs all ordered scale variables, ensuring that the implementation remains conceptually simple and internally consistent.
 
 The estimator integrates across predictive model families through a runtime
-adapter registry. The default registry contains k-NN, linear, Gaussian, and
-MLP adapters. Each registration has an explicit family prior weight, and each
+adapter registry. The default registry contains k-NN, linear, and Gaussian
+adapters with equal prior weight. MLP is available as an opt-in adapter. Each
+registration has an explicit family prior weight, and each
 adapter owns the prior over its complete estimator-parameter configuration.
 All registered models are averaged using the same cross-validated
 pseudo-posterior weights.
@@ -113,8 +114,9 @@ complete valid parameter configuration, constructs a scikit-learn estimator,
 and declares any predictive concentration used by the generic scorer. A new
 family can therefore be added without changing the Bayesian integration engine.
 
-The built-in adapters are k-NN, linear, Gaussian, and MLP. The MLP adapter
-uses structured priors over architecture, activation, regularization, and
+The built-in adapters are k-NN, linear, Gaussian, and MLP; MLP is not included
+in the default registry. The MLP adapter uses structured priors over
+architecture, activation, regularization, and
 learning rate. Gaussian covariance structure is sampled by its adapter as a
 discrete parameter of the complete family draw. The structures are ordered by
 complexity:
