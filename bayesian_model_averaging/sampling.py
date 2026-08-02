@@ -234,6 +234,14 @@ def prepare_model(
     cv_splitter = make_cv_splitter(task, cv, int(rng.integers(0, 2**32 - 1)))
     splits = list(cv_splitter.split(X_subset, y_subset))
     n_train_min = min(len(train_indices) for train_indices, _ in splits)
+    min_class_train_size = None
+    if task == "classification":
+        subset_classes = np.unique(y_subset)
+        min_class_train_size = min(
+            int(np.count_nonzero(y_subset[train_indices] == label))
+            for train_indices, _ in splits
+            for label in subset_classes
+        )
     context = SamplingContext(
         task=task,
         n_features=int(transformed.shape[1]),
@@ -243,6 +251,7 @@ def prepare_model(
         min_train_size=n_train_min,
         classes=classes,
         scale_prior=scale_prior,
+        min_class_train_size=min_class_train_size,
     )
     parameter_prior = family_adapter.sample_parameters(context, rng)
     if not np.isfinite(parameter_prior.log_probability):

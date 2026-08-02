@@ -14,6 +14,7 @@ from bayesian_model_averaging import (
     DecisionTreeAdapter,
     FamilyRegistration,
     GaussianAdapter,
+    GaussianMixtureAdapter,
     KNNAdapter,
     LinearAdapter,
     LogisticScalePrior,
@@ -73,6 +74,7 @@ def test_builtin_classifier_concentrations_are_comparable():
     assert KNNAdapter().predictive_concentration("classification", parameters) == 1.0
     assert LinearAdapter().predictive_concentration("classification", {}) == 1.0
     assert GaussianAdapter().predictive_concentration("classification", {}) == 1.0
+    assert GaussianMixtureAdapter().predictive_concentration("classification", {}) == 1.0
     assert MLPAdapter().predictive_concentration("classification", {}) == 1.0
 
 
@@ -157,6 +159,25 @@ def test_gaussian_adapter_integrates_covariance_structures(data):
     assert all(draw["parameter_prior"]["metadata"]["covariance_draw"] for draw in draws)
 
 
+def test_gaussian_mixture_adapter_samples_components_and_covariance(data):
+    X, y, _ = data
+    estimator = BayesianModelAveragingClassifier(
+        **{
+            **estimator_kwargs(GaussianMixtureAdapter(max_components=4)),
+            "n_estimators": 12,
+        }
+    ).fit(X, y)
+    draws = estimator.get_model_draws()
+    assert all(draw["family_name"] == "gaussian_mixture" for draw in draws)
+    assert all(1 <= draw["parameters"]["n_components"] <= 4 for draw in draws)
+    assert all(
+        draw["parameters"]["covariance_structure"] in {"isotropic", "diagonal", "full"}
+        for draw in draws
+    )
+    assert all(draw["parameter_prior"]["metadata"]["component_draw"] for draw in draws)
+    assert estimator.predict_proba(X[:3]).shape == (3, 3)
+
+
 @pytest.mark.parametrize("task", ["classification", "regression"])
 def test_linear_adapter_is_valid_for_both_tasks(data, task):
     X, y_class, y_reg = data
@@ -183,7 +204,7 @@ def test_default_registry_contains_built_in_families(data):
         random_state=7,
     ).fit(X, y)
     names = {draw["family_name"] for draw in estimator.get_model_draws()}
-    assert names == {"knn", "linear", "gaussian", "mlp", "decision_tree"}
+    assert names == {"knn", "linear", "gaussian_mixture", "mlp", "decision_tree"}
     assert all(
         draw["family_prior_probability"] == pytest.approx(1 / 5)
         for draw in estimator.get_model_draws()
@@ -191,10 +212,13 @@ def test_default_registry_contains_built_in_families(data):
     masses = estimator.get_model_masses()
     assert np.isclose(sum(masses["family"].values()), 1.0)
     assert np.isclose(
-        sum(masses["parameter"]["gaussian"]["covariance_structure"].values()),
+        sum(
+            masses["parameter"]["gaussian_mixture"]["covariance_structure"].values()
+        ),
         1.0,
     )
     assert np.isclose(sum(masses["parameter"]["knn"]["n_neighbors"].values()), 1.0)
+    assert np.isclose(sum(masses["parameter"]["gaussian_mixture"]["n_components"].values()), 1.0)
     assert np.isclose(sum(masses["parameter"]["decision_tree"]["max_depth"].values()), 1.0)
 
 

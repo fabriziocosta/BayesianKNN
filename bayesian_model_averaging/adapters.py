@@ -13,7 +13,7 @@ from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
-from .model_families import GaussianClassifier
+from .model_families import GaussianClassifier, GaussianMixtureClassifier
 from .priors import (
     CategoricalPrior,
     GaussianCovariancePrior,
@@ -36,6 +36,7 @@ class SamplingContext:
     min_train_size: int
     classes: np.ndarray | None
     scale_prior: Any
+    min_class_train_size: int | None = None
 
 
 @runtime_checkable
@@ -399,6 +400,105 @@ class GaussianAdapter(BaseEstimator):
         return 1.0
 
 
+class GaussianMixtureAdapter(BaseEstimator):
+    """Adapter for class-conditional Gaussian-mixture classifiers."""
+
+    name = "gaussian_mixture"
+    supported_tasks = frozenset({"classification"})
+    supported_representations = frozenset({"identity", "gaussian", "sparse"})
+
+    def __init__(
+        self,
+        max_components: int = 30,
+        component_simplicity: float = 1.0,
+        covariance_prior: GaussianCovariancePrior | None = None,
+        reg_covar: float = 1e-6,
+        max_iter: int = 100,
+    ) -> None:
+        self.max_components = max_components
+        self.component_simplicity = component_simplicity
+        self.covariance_prior = covariance_prior
+        self.reg_covar = reg_covar
+        self.max_iter = max_iter
+
+    def sample_parameters(
+        self,
+        context: SamplingContext,
+        rng: np.random.Generator,
+    ) -> ParameterDraw:
+        if context.task != "classification":
+            raise ValueError("GaussianMixtureAdapter supports classification only")
+        max_components = int(self.max_components)
+        if max_components < 1:
+            raise ValueError("max_components must be positive")
+        if not np.isfinite(self.component_simplicity) or self.component_simplicity <= 0:
+            raise ValueError("component_simplicity must be finite and positive")
+        if context.min_class_train_size is None:
+            if context.n_classes is None or context.n_classes < 1:
+                raise ValueError("Gaussian mixture sampling requires class counts")
+            min_class_train_size = max(1, context.min_train_size // context.n_classes)
+        else:
+            min_class_train_size = int(context.min_class_train_size)
+        valid_max_components = min(max_components, min_class_train_size)
+        if valid_max_components < 1:
+            raise ValueError("no valid Gaussian-mixture component count")
+
+        component_values = tuple(range(1, valid_max_components + 1))
+        component_prior = SimplicityCategoricalPrior(
+            component_values,
+            component_values,
+            simplicity=float(self.component_simplicity),
+        )
+        n_components, component_log_probability, component_metadata = component_prior.draw(rng)
+
+        covariance_prior = self.covariance_prior or GaussianCovariancePrior()
+        covariance_draw = covariance_prior.draw(context.n_features, rng)
+        return ParameterDraw(
+            parameters={
+                "n_components": int(n_components),
+                "covariance_structure": covariance_draw.value,
+                "reg_covar": float(self.reg_covar),
+                "max_iter": int(self.max_iter),
+            },
+            log_probability=float(component_log_probability + covariance_draw.log_probability),
+            metadata={
+                "component_draw": _categorical_metadata(
+                    n_components, component_log_probability, component_metadata
+                ),
+                "covariance_draw": {
+                    "value": covariance_draw.value,
+                    "probability": covariance_draw.probability,
+                    "log_probability": covariance_draw.log_probability,
+                    "probabilities": tuple(covariance_draw.probabilities),
+                },
+                "valid_max_components": valid_max_components,
+            },
+        )
+
+    def build_estimator(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+        random_state: int,
+    ) -> BaseEstimator:
+        if task != "classification":
+            raise ValueError("GaussianMixtureAdapter supports classification only")
+        return GaussianMixtureClassifier(
+            n_components=int(parameters["n_components"]),
+            covariance_structure=str(parameters["covariance_structure"]),
+            reg_covar=float(parameters.get("reg_covar", self.reg_covar)),
+            max_iter=int(parameters.get("max_iter", self.max_iter)),
+            random_state=random_state,
+        )
+
+    def predictive_concentration(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+    ) -> float:
+        return 1.0
+
+
 class MLPAdapter(BaseEstimator):
     """Adapter with simplicity priors over small neural-network architectures."""
 
@@ -514,7 +614,7 @@ def default_family_registry() -> tuple[FamilyRegistration, ...]:
         for adapter in (
             KNNAdapter(),
             LinearAdapter(),
-            GaussianAdapter(),
+            GaussianMixtureAdapter(),
             MLPAdapter(),
             DecisionTreeAdapter(),
         )

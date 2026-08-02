@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 from scipy.sparse import issparse
 from scipy.special import logsumexp
+from sklearn.mixture import GaussianMixture
 
 
 def _dense(X: Any) -> np.ndarray:
@@ -61,6 +62,82 @@ class GaussianClassifier:
         log_scores = self.class_log_prior_ - 0.5 * (
             X.shape[1] * np.log(2.0 * np.pi) + self.log_determinants_ + mahalanobis
         )
+        return log_scores - logsumexp(log_scores, axis=1, keepdims=True)
+
+    def predict_proba(self, X: Any) -> np.ndarray:
+        return np.exp(self.predict_log_proba(X))
+
+    def predict(self, X: Any) -> np.ndarray:
+        return self.classes_[np.argmax(self.predict_log_proba(X), axis=1)]
+
+
+class GaussianMixtureClassifier:
+    """Generative classifier with one Gaussian mixture fitted per class."""
+
+    _covariance_types = {
+        "isotropic": "spherical",
+        "diagonal": "diag",
+        "full": "full",
+    }
+
+    def __init__(
+        self,
+        n_components: int,
+        covariance_structure: str,
+        reg_covar: float = 1e-6,
+        max_iter: int = 100,
+        random_state: int | None = None,
+    ) -> None:
+        self.n_components = int(n_components)
+        self.covariance_structure = covariance_structure
+        self.reg_covar = float(reg_covar)
+        self.max_iter = int(max_iter)
+        self.random_state = random_state
+
+    def fit(self, X: Any, y: Any) -> GaussianMixtureClassifier:
+        X = _dense(X)
+        if self.n_components < 1:
+            raise ValueError("n_components must be positive")
+        try:
+            covariance_type = self._covariance_types[self.covariance_structure]
+        except KeyError as exc:
+            raise ValueError(
+                "covariance_structure must be isotropic, diagonal, or full"
+            ) from exc
+        self.classes_, counts = np.unique(y, return_counts=True)
+        if np.any(counts < self.n_components):
+            raise ValueError("n_components cannot exceed samples in every class")
+        self.class_log_prior_ = np.log(counts / counts.sum())
+        self.mixtures_ = []
+        for class_index, label in enumerate(self.classes_):
+            class_samples = X[y == label]
+            if len(class_samples) == 1:
+                # GaussianMixture requires two rows even for one component.
+                # The regularization then supplies the covariance for this
+                # degenerate CV fold without changing the class location.
+                class_samples = np.repeat(class_samples, 2, axis=0)
+            mixture = GaussianMixture(
+                n_components=self.n_components,
+                covariance_type=covariance_type,
+                reg_covar=self.reg_covar,
+                max_iter=self.max_iter,
+                n_init=1,
+                random_state=(
+                    None
+                    if self.random_state is None
+                    else int(self.random_state) + class_index
+                ),
+            )
+            mixture.fit(class_samples)
+            self.mixtures_.append(mixture)
+        return self
+
+    def predict_log_proba(self, X: Any) -> np.ndarray:
+        X = _dense(X)
+        log_scores = np.column_stack(
+            [mixture.score_samples(X) for mixture in self.mixtures_]
+        )
+        log_scores += self.class_log_prior_[None, :]
         return log_scores - logsumexp(log_scores, axis=1, keepdims=True)
 
     def predict_proba(self, X: Any) -> np.ndarray:

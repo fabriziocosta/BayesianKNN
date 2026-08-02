@@ -131,7 +131,7 @@ class FamilyRegistration:
 registry normalizes positive weights to sum to one, rejects duplicate names,
 and filters families that do not support the requested task. A one-entry
 registry is therefore a fixed-family ensemble. If `family_registry` is not
-specified, the default is a uniform mixture of k-NN, linear, Gaussian, MLP, and
+specified, the default is a uniform mixture of k-NN, linear, Gaussian-mixture, MLP, and
 decision-tree families.
 
 ### Adapter responsibilities
@@ -164,11 +164,14 @@ override `predictive_concentration`, but the value must be positive and finite.
 | `KNNAdapter` | `KNeighborsClassifier` | `KNeighborsRegressor` | identity, Gaussian projection, sparse projection | `n_neighbors`, `weights`, `metric` |
 | `LinearAdapter` | `LogisticRegression` | `Ridge` | identity, Gaussian projection, sparse projection | solver/iterations or ridge `alpha` |
 | `GaussianAdapter` | `GaussianClassifier` | `BayesianRidge` | identity, Gaussian projection, sparse projection | classification covariance structure |
+| `GaussianMixtureAdapter` | class-conditional `GaussianMixture` | — | identity, Gaussian projection, sparse projection | `n_components` up to 30, covariance structure |
 | `MLPAdapter` | `MLPClassifier` | `MLPRegressor` | identity | architecture, activation, regularization, learning rate |
 | `DecisionTreeAdapter` | `DecisionTreeClassifier` | `DecisionTreeRegressor` | identity, Gaussian projection, sparse projection | depth, split/leaf sizes, criterion, splitter |
 
-The Gaussian classifier fits a separate Gaussian likelihood for every class.
-Its sampled covariance structure is one of `isotropic`, `diagonal`, or `full`.
+The `GaussianAdapter` fits a single Gaussian likelihood for every class. The
+default `GaussianMixtureAdapter` instead fits a separate Gaussian mixture for
+every class, with a simplicity prior favoring fewer than 30 components. Both
+families sample covariance structure from `isotropic`, `diagonal`, or `full`.
 Gaussian regression uses `BayesianRidge`; covariance structure is not sampled
 for regression.
 
@@ -397,9 +400,12 @@ method name is retained for API stability:
 
 ```python
 {
-    "family": {"gaussian": ..., "knn": ..., "linear": ..., "mlp": ..., "decision_tree": ...},
+    "family": {"gaussian_mixture": ..., "knn": ..., "linear": ..., "mlp": ..., "decision_tree": ...},
     "parameter": {
-        "gaussian": {"covariance_structure": {...}},
+        "gaussian_mixture": {
+            "covariance_structure": {...},
+            "n_components": {...},
+        },
         "knn": {"n_neighbors": {...}},
         ...,
     },

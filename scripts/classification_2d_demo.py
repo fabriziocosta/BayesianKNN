@@ -47,9 +47,18 @@ def run_and_report(
         print(
             format_family_parameter_shares(
                 result,
-                "gaussian",
+                "gaussian_mixture",
                 "covariance_structure",
-                "  gaussian covariance structure posterior shares",
+                "  gaussian-mixture covariance structure posterior shares",
+            )
+        )
+        print(
+            format_family_parameter_shares(
+                result,
+                "gaussian_mixture",
+                "n_components",
+                "  gaussian-mixture component-count posterior shares (top 12)",
+                max_items=12,
             )
         )
         print(
