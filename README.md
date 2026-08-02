@@ -20,13 +20,13 @@ Available estimators:
 - `BayesianModelAveragingClassifier`, including `predict_proba()`
 - `BayesianModelAveragingRegressor`
 
-The default runtime registry averages k-NN, linear, Gaussian, and MLP adapters
+The default runtime registry averages k-NN, linear, Gaussian, MLP, and decision-tree adapters
 with uniform family prior weights. New scikit-learn estimator families can be
 registered explicitly with a prior weight and an adapter-owned hyperparameter
 prior without changing the averaging engine.
 
-`DecisionTreeAdapter` is available as an opt-in family with priors over tree
-depth, split and leaf sizes, criterion, and splitter.
+The decision-tree adapter uses priors over tree depth, split and leaf sizes,
+criterion, and splitter.
 
 For example, use only a configured k-NN family with:
 

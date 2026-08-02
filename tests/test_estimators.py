@@ -183,9 +183,9 @@ def test_default_registry_contains_built_in_families(data):
         random_state=7,
     ).fit(X, y)
     names = {draw["family_name"] for draw in estimator.get_model_draws()}
-    assert names == {"knn", "linear", "gaussian", "mlp"}
+    assert names == {"knn", "linear", "gaussian", "mlp", "decision_tree"}
     assert all(
-        draw["family_prior_probability"] == pytest.approx(1 / 4)
+        draw["family_prior_probability"] == pytest.approx(1 / 5)
         for draw in estimator.get_model_draws()
     )
     masses = estimator.get_model_masses()
@@ -195,6 +195,7 @@ def test_default_registry_contains_built_in_families(data):
         1.0,
     )
     assert np.isclose(sum(masses["parameter"]["knn"]["n_neighbors"].values()), 1.0)
+    assert np.isclose(sum(masses["parameter"]["decision_tree"]["max_depth"].values()), 1.0)
 
 
 def test_explicit_family_weights_are_normalized(data):

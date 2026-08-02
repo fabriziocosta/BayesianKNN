@@ -73,5 +73,21 @@ def run_and_report(
                 "  mlp activation posterior shares",
             )
         )
+        print(
+            format_family_parameter_shares(
+                result,
+                "decision_tree",
+                "max_depth",
+                "  decision tree max-depth posterior shares",
+            )
+        )
+        print(
+            format_family_parameter_shares(
+                result,
+                "decision_tree",
+                "criterion",
+                "  decision tree criterion posterior shares",
+            )
+        )
         print(format_convergence_history(result))
         yield result
