@@ -73,6 +73,14 @@ def run_and_report(
         print(
             format_family_parameter_shares(
                 result,
+                "linear_mixture",
+                "n_experts",
+                "  linear-mixture expert-count posterior shares",
+            )
+        )
+        print(
+            format_family_parameter_shares(
+                result,
                 "mlp",
                 "hidden_layer_sizes",
                 "  mlp architecture posterior shares",

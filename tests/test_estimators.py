@@ -17,6 +17,7 @@ from bayesian_model_averaging import (
     GaussianMixtureAdapter,
     KNNAdapter,
     LinearAdapter,
+    LinearMixtureAdapter,
     LogisticScalePrior,
     MLPAdapter,
     ParameterDraw,
@@ -75,6 +76,7 @@ def test_builtin_classifier_concentrations_are_comparable():
     assert LinearAdapter().predictive_concentration("classification", {}) == 1.0
     assert GaussianAdapter().predictive_concentration("classification", {}) == 1.0
     assert GaussianMixtureAdapter().predictive_concentration("classification", {}) == 1.0
+    assert LinearMixtureAdapter().predictive_concentration("classification", {}) == 1.0
     assert MLPAdapter().predictive_concentration("classification", {}) == 1.0
 
 
@@ -251,6 +253,28 @@ def test_mlp_adapter_samples_structured_parameters(data):
     assert all(draw["parameters"]["activation"] in {"relu", "tanh", "logistic"} for draw in draws)
     assert all(isinstance(draw["parameters"]["hidden_layer_sizes"], tuple) for draw in draws)
     assert all(np.isfinite(draw["parameter_prior"]["log_probability"]) for draw in draws)
+
+
+def test_linear_mixture_adapter_supports_classification_and_regression(data):
+    X, y, y_reg = data
+    classifier = BayesianModelAveragingClassifier(
+        **{
+            **estimator_kwargs(LinearMixtureAdapter(max_experts=3)),
+            "n_estimators": 2,
+        }
+    ).fit(X, y)
+    classifier_draws = classifier.get_model_draws()
+    assert all(draw["family_name"] == "linear_mixture" for draw in classifier_draws)
+    assert all(1 <= draw["parameters"]["n_experts"] <= 3 for draw in classifier_draws)
+    assert classifier.predict_proba(X[:3]).shape == (3, 3)
+
+    regressor = BayesianModelAveragingRegressor(
+        **{
+            **estimator_kwargs(LinearMixtureAdapter(max_experts=3)),
+            "n_estimators": 2,
+        }
+    ).fit(X, y_reg)
+    assert regressor.predict(X[:3]).shape == (3,)
 
 
 def test_mlp_adapter_supports_regression(data):

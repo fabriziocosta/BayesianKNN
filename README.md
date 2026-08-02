@@ -32,6 +32,10 @@ The default Gaussian-mixture adapter fits one mixture per class, samples up to
 30 components, prefers simpler mixtures, and samples isotropic, diagonal, or
 full covariance structures.
 
+`LinearMixtureAdapter` is available as an opt-in gated mixture of logistic or
+ridge linear experts. Its learned linear softmax gate makes the expert weights
+input-dependent while retaining linear experts.
+
 For example, use only a configured k-NN family with:
 
 ```python

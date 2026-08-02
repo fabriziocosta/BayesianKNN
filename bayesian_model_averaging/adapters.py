@@ -13,7 +13,12 @@ from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
 
-from .model_families import GaussianClassifier, GaussianMixtureClassifier
+from .model_families import (
+    GatedLinearExpertsClassifier,
+    GatedLinearExpertsRegressor,
+    GaussianClassifier,
+    GaussianMixtureClassifier,
+)
 from .priors import (
     CategoricalPrior,
     GaussianCovariancePrior,
@@ -341,6 +346,110 @@ class LinearAdapter(BaseEstimator):
                 random_state=random_state,
             )
         return Ridge(alpha=float(parameters["alpha"]))
+
+    def predictive_concentration(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+    ) -> float:
+        return 1.0
+
+
+class LinearMixtureAdapter(BaseEstimator):
+    """Adapter for gated mixtures of logistic or ridge linear experts."""
+
+    name = "linear_mixture"
+    supported_tasks = frozenset({"classification", "regression"})
+    supported_representations = frozenset({"identity", "gaussian", "sparse"})
+
+    def __init__(
+        self,
+        max_experts: int = 5,
+        expert_simplicity: float = 1.0,
+        expert_alpha_prior: LogUniformPrior | None = None,
+        gating_alpha_prior: LogUniformPrior | None = None,
+        max_iter: int = 100,
+        tol: float = 1e-4,
+    ) -> None:
+        self.max_experts = max_experts
+        self.expert_simplicity = expert_simplicity
+        self.expert_alpha_prior = expert_alpha_prior
+        self.gating_alpha_prior = gating_alpha_prior
+        self.max_iter = max_iter
+        self.tol = tol
+
+    def sample_parameters(
+        self,
+        context: SamplingContext,
+        rng: np.random.Generator,
+    ) -> ParameterDraw:
+        max_experts = int(self.max_experts)
+        if max_experts < 1:
+            raise ValueError("max_experts must be positive")
+        if not np.isfinite(self.expert_simplicity) or self.expert_simplicity <= 0:
+            raise ValueError("expert_simplicity must be finite and positive")
+        valid_max_experts = min(max_experts, context.min_train_size)
+        if valid_max_experts < 1:
+            raise ValueError("no valid linear-expert count")
+        expert_count_prior = SimplicityCategoricalPrior(
+            range(1, valid_max_experts + 1),
+            range(1, valid_max_experts + 1),
+            simplicity=float(self.expert_simplicity),
+        )
+        n_experts, count_log_probability, count_metadata = expert_count_prior.draw(rng)
+
+        expert_prior = self.expert_alpha_prior or LogUniformPrior(1e-3, 1e1)
+        gating_prior = self.gating_alpha_prior or LogUniformPrior(1e-3, 1e1)
+        expert_alpha, expert_log_probability, expert_metadata = expert_prior.draw(rng)
+        gating_alpha, gating_log_probability, gating_metadata = gating_prior.draw(rng)
+        return ParameterDraw(
+            parameters={
+                "n_experts": int(n_experts),
+                "expert_alpha": expert_alpha,
+                "gating_alpha": gating_alpha,
+                "max_iter": int(self.max_iter),
+                "tol": float(self.tol),
+            },
+            log_probability=float(
+                count_log_probability + expert_log_probability + gating_log_probability
+            ),
+            metadata={
+                "expert_count_draw": _categorical_metadata(
+                    n_experts, count_log_probability, count_metadata
+                ),
+                "expert_alpha": {
+                    "value": expert_alpha,
+                    "log_probability": expert_log_probability,
+                    **expert_metadata,
+                },
+                "gating_alpha": {
+                    "value": gating_alpha,
+                    "log_probability": gating_log_probability,
+                    **gating_metadata,
+                },
+                "valid_max_experts": valid_max_experts,
+            },
+        )
+
+    def build_estimator(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+        random_state: int,
+    ) -> BaseEstimator:
+        estimator_class = (
+            GatedLinearExpertsClassifier
+            if task == "classification"
+            else GatedLinearExpertsRegressor
+        )
+        return estimator_class(
+            n_experts=int(parameters["n_experts"]),
+            expert_alpha=float(parameters["expert_alpha"]),
+            gating_alpha=float(parameters["gating_alpha"]),
+            max_iter=int(parameters["max_iter"]),
+            tol=float(parameters["tol"]),
+            random_state=random_state,
+        )
 
     def predictive_concentration(
         self,

@@ -165,6 +165,7 @@ override `predictive_concentration`, but the value must be positive and finite.
 | `LinearAdapter` | `LogisticRegression` | `Ridge` | identity, Gaussian projection, sparse projection | solver/iterations or ridge `alpha` |
 | `GaussianAdapter` | `GaussianClassifier` | `BayesianRidge` | identity, Gaussian projection, sparse projection | classification covariance structure |
 | `GaussianMixtureAdapter` | class-conditional `GaussianMixture` | — | identity, Gaussian projection, sparse projection | `n_components` up to 30, covariance structure |
+| `LinearMixtureAdapter` | gated logistic experts | gated ridge experts | identity, Gaussian projection, sparse projection | expert count, expert/gate regularization |
 | `MLPAdapter` | `MLPClassifier` | `MLPRegressor` | identity | architecture, activation, regularization, learning rate |
 | `DecisionTreeAdapter` | `DecisionTreeClassifier` | `DecisionTreeRegressor` | identity, Gaussian projection, sparse projection | depth, split/leaf sizes, criterion, splitter |
 
@@ -179,6 +180,11 @@ All built-in adapters currently return predictive concentration `1.0`. In
 particular, k-NN neighbourhood size is already expressed in the k-NN
 probability vector and is not applied a second time as a confidence multiplier.
 This calibration choice keeps family CV scores comparable.
+
+`LinearMixtureAdapter` fits a finite mixture of logistic or ridge experts with
+a learned linear softmax gate. The gate makes expert weights depend on the
+input, so the resulting predictor can represent piecewise-linear nonlinear
+boundaries. Its expert-count prior favors fewer experts.
 
 ### Registering a new family
 
