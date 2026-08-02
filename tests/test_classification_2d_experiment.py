@@ -98,7 +98,7 @@ def test_blobs_expose_center_and_spread_controls():
         make_2d_dataset("blobs", n_classes=3, blob_cluster_standard_deviation=0)
 
 
-def test_multiclass_plot_creates_one_probability_panel_per_class():
+def test_multiclass_plot_uses_one_mixed_probability_panel():
     pytest.importorskip("matplotlib")
     result = run_2d_classification_experiment(
         "iris",
@@ -107,4 +107,5 @@ def test_multiclass_plot_creates_one_probability_panel_per_class():
         model_parameters=_small_model_parameters(),
     )
     figure = plot_probability_heatmap(result, grid_size=12)
-    assert len(figure.axes) == 6
+    assert len(figure.axes) == 2
+    assert figure.axes[0].get_title() == "Class probability mixture"

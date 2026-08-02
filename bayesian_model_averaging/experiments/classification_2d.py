@@ -527,7 +527,13 @@ def plot_probability_heatmap(
     dotted_threshold: float = 0.25,
     output_path: str | Path | None = None,
 ) -> Any:
-    """Plot probability surfaces with configurable dotted contours."""
+    """Plot probability surfaces with configurable uncertainty contours.
+
+    Binary problems retain the per-class probability panels. For multiclass
+    problems, class probabilities are mixed using the ``tab10`` class colors;
+    normalized entropy controls how strongly the mixture is shown, making
+    uncertain regions white.
+    """
 
     if not np.isfinite(dotted_threshold) or not 0 < dotted_threshold < 0.5:
         raise ValueError("dotted_threshold must be finite and strictly between 0 and 0.5")
@@ -540,14 +546,89 @@ def plot_probability_heatmap(
         grid_size=grid_size,
     )
     classes = result.model.classes_
-    labels = list(classes) if class_label is None and len(classes) > 2 else [
-        result.probability_class if class_label is None else class_label
-    ]
+    colors = plt.get_cmap("tab10")
+
+    if len(classes) > 2:
+        from matplotlib.cm import ScalarMappable
+        from matplotlib.colors import Normalize
+
+        palette = np.asarray(
+            [colors(class_index)[:3] for class_index in range(len(classes))]
+        )
+        color_mixture = probabilities @ palette
+        safe_probabilities = np.clip(probabilities, np.finfo(float).tiny, 1.0)
+        entropy = -np.sum(
+            probabilities * np.log(safe_probabilities),
+            axis=2,
+        )
+        confidence = 1.0 - entropy / np.log(len(classes))
+        rgb = 1.0 - confidence[..., None] * (1.0 - color_mixture)
+
+        fig, ax = plt.subplots(figsize=(9, 6.5))
+        ax.imshow(
+            np.clip(rgb, 0.0, 1.0),
+            origin="lower",
+            extent=(xx.min(), xx.max(), yy.min(), yy.max()),
+            interpolation="nearest",
+            aspect="auto",
+        )
+        predicted_indices = np.argmax(probabilities, axis=2)
+        boundaries = np.arange(0.5, len(classes) - 0.5, 1.0)
+        ax.contour(
+            xx,
+            yy,
+            predicted_indices,
+            levels=boundaries,
+            linewidths=2,
+            colors="black",
+        )
+        confidence_level = 1.0 - dotted_threshold
+        if confidence.min() <= confidence_level <= confidence.max():
+            ax.contour(
+                xx,
+                yy,
+                confidence,
+                levels=[confidence_level],
+                linewidths=1.4,
+                linestyles=":",
+                colors="black",
+            )
+        for class_index, class_value in enumerate(classes):
+            mask = result.y_train == class_value
+            ax.scatter(
+                result.X_train[mask, 0],
+                result.X_train[mask, 1],
+                s=24,
+                color=palette[class_index],
+                edgecolors="white",
+                linewidths=0.45,
+                label=f"Class {class_value}",
+            )
+        confidence_scale = ScalarMappable(
+            norm=Normalize(vmin=0.0, vmax=1.0),
+            cmap="Greys_r",
+        )
+        confidence_scale.set_array(confidence)
+        colorbar = fig.colorbar(confidence_scale, ax=ax)
+        colorbar.set_label("Confidence (1 − normalized entropy)")
+        ax.set_title("Class probability mixture")
+        ax.set_xlabel("Feature 1")
+        ax.set_ylabel("Feature 2")
+        ax.legend(loc="upper right")
+        fig.suptitle(
+            f"Bayesian model averaging on {result.dataset}\n"
+            f"{result.model.n_estimators_} estimators, test accuracy = {result.test_accuracy:.3f}"
+        )
+        fig.tight_layout(rect=(0, 0, 1, 0.94))
+        if output_path is not None:
+            fig.savefig(output_path, dpi=180, bbox_inches="tight")
+        return fig
+
+    labels = [result.probability_class if class_label is None else class_label]
     indices = [_class_probability_index(result, label) for label in labels]
     figure_width = 9 if len(labels) == 1 else 6 * len(labels)
     fig, axes = plt.subplots(1, len(labels), figsize=(figure_width, 6.5), squeeze=False)
     axes = axes.ravel()
-    colors = plt.get_cmap("tab10")
     predicted_indices = np.argmax(probabilities, axis=2)
     for ax, label, index in zip(axes, labels, indices):
         probability = probabilities[:, :, index]
