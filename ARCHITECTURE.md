@@ -204,6 +204,12 @@ probabilities = model.predict_proba(X_test)
 predictions = model.predict(X_test)
 ~~~
 
+The optional `temperature` parameter controls concentration of the ensemble
+weights. It defaults to `1.0`; values below one concentrate mass on models
+with higher cross-validated pseudo-likelihood, while values above one spread
+mass more evenly. This is model-weight tempering, not post-hoc calibration of
+the final class probabilities.
+
 `BayesianModelAveragingRegressor` exposes the corresponding `fit`, `predict`, `score`, and `get_model_draws` methods. It intentionally does not expose `predict_proba`.
 
 ## Unified logistic scale prior
@@ -658,6 +664,17 @@ $$
 
 Compute the stored `posterior_weight` by applying a numerically stable softmax to the sampled models' `log_importance_weight` values, so the weights are finite and sum to one.
 
+With temperature `T`, use
+
+$$
+w_i(T) = \operatorname{softmax}_i\left(\frac{\ell_i}{T}\right),
+$$
+
+where `ell_i` is the model's cross-validated pseudo-log-likelihood. Thus
+`T < 1` favors the most supported models and can sharpen decision boundaries,
+whereas `T > 1` increases model averaging and smooths them. The default
+`T = 1` is the ordinary pseudo-posterior weighting.
+
 Do not multiply by the prior probability again in this default case, because that would count the prior twice. These are pseudo-posterior weights, not exact Bayesian posterior probabilities, because the scoring utility is cross-validated and averaged.
 
 Nevertheless, store the log prior probabilities for:
@@ -856,7 +873,7 @@ get_model_draws()
 
 The regressor supports `fit()`, `predict()`, `score()`, and `get_model_draws()`. It does not expose `predict_proba()`, consistent with the scikit-learn estimator API.
 
-The estimator constructors must expose, validate, and preserve through cloning the parameters that affect these rules, including `cv`, `alpha`, `epsilon`, `max_neighbors`, `n_estimators`, `max_estimators`, `tolerance`, `convergence_metric`, `n_jobs`, and `random_state`.
+The estimator constructors must expose, validate, and preserve through cloning the parameters that affect these rules, including `cv`, `alpha`, `epsilon`, `temperature`, `max_neighbors`, `n_estimators`, `max_estimators`, `tolerance`, `convergence_metric`, `n_jobs`, and `random_state`.
 
 The implementation must comply with the scikit-learn estimator API and support cloning, pipelines, and GridSearchCV. It must be organized so that new representation modules, priors, convergence criteria, or prediction engines can be added without changing the core Bayesian integration logic.
 

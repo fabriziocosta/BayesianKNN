@@ -11,6 +11,7 @@ from bayesian_model_averaging import (
     BayesianModelAveragingRegressor,
     LogisticScalePrior,
 )
+from bayesian_model_averaging.utils import stable_softmax
 
 
 @pytest.fixture
@@ -160,6 +161,33 @@ def test_mixed_model_family_averages_knn_linear_and_gaussian(data):
 
 def test_model_averaging_defaults_to_mixed_family():
     assert BayesianModelAveragingClassifier().get_params()["model_family"] == "mixed"
+
+
+def test_temperature_concentrates_mass_on_higher_scoring_models(data):
+    X, y, _ = data
+    common = {
+        **estimator_kwargs(),
+        "model_family": "mixed",
+        "n_estimators": 20,
+    }
+    ordinary = BayesianModelAveragingClassifier(**common).fit(X, y)
+    sharp = BayesianModelAveragingClassifier(**{**common, "temperature": 0.25}).fit(X, y)
+
+    ordinary_draws = ordinary.get_model_draws()
+    sharp_draws = sharp.get_model_draws()
+    ordinary_scores = np.asarray(
+        [draw["log_importance_weight"] for draw in ordinary_draws]
+    )
+    sharp_scores = np.asarray([draw["log_importance_weight"] for draw in sharp_draws])
+    ordinary_weights = np.asarray(
+        [draw["posterior_weight"] for draw in ordinary_draws]
+    )
+    sharp_weights = np.asarray([draw["posterior_weight"] for draw in sharp_draws])
+
+    assert np.allclose(ordinary_scores, sharp_scores)
+    assert np.allclose(ordinary_weights, stable_softmax(ordinary_scores))
+    assert np.allclose(sharp_weights, stable_softmax(sharp_scores / 0.25))
+    assert np.sum(sharp_weights**2) > np.sum(ordinary_weights**2)
 
 
 def test_model_masses_report_family_and_nested_choice_mass(data):

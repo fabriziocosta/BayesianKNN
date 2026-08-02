@@ -62,6 +62,7 @@ class BayesianModelAveragingBase(BaseEstimator):
         convergence_size: int = 100,
         alpha: float = 1.0,
         epsilon: float = 1e-8,
+        temperature: float = 1.0,
         n_jobs: int | None = -1,
         random_state: Any = None,
     ) -> None:
@@ -82,6 +83,7 @@ class BayesianModelAveragingBase(BaseEstimator):
         self.convergence_size = convergence_size
         self.alpha = alpha
         self.epsilon = epsilon
+        self.temperature = temperature
         self.n_jobs = n_jobs
         self.random_state = random_state
 
@@ -116,6 +118,8 @@ class BayesianModelAveragingBase(BaseEstimator):
             raise ValueError("alpha must be finite and positive")
         if not np.isfinite(self.epsilon) or self.epsilon <= 0:
             raise ValueError("epsilon must be finite and positive")
+        if not np.isfinite(self.temperature) or self.temperature <= 0:
+            raise ValueError("temperature must be finite and positive")
         for name, value in (
             ("min_subset_size", self.min_subset_size),
             ("max_subset_size", self.max_subset_size),
@@ -245,7 +249,8 @@ class BayesianModelAveragingBase(BaseEstimator):
         )
 
     def _update_weights(self) -> None:
-        weights = stable_softmax(np.array([model.log_importance_weight for model in self._models]))
+        log_scores = np.array([model.log_importance_weight for model in self._models])
+        weights = stable_softmax(log_scores / self.temperature)
         for model, weight in zip(self._models, weights):
             model.posterior_weight = float(weight)
         self.model_masses_ = aggregate_model_masses(self._models)
