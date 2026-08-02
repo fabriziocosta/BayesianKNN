@@ -77,7 +77,12 @@ class ModelDraw:
 
 
 def aggregate_model_masses(draws: Sequence[ModelDraw]) -> dict[str, Any]:
-    """Aggregate posterior mass by the dynamically registered family names."""
+    """Aggregate posterior mass by family and sampled parameter values.
+
+    Parameter masses are conditional within each family, so the values under
+    each family/parameter mapping sum to one. This keeps the diagnostic
+    independent of any particular adapter's parameter names.
+    """
 
     if not draws:
         raise ValueError("draws must contain at least one model")
@@ -86,6 +91,31 @@ def aggregate_model_masses(draws: Sequence[ModelDraw]) -> dict[str, Any]:
         raise ValueError("model posterior weights must be finite and non-negative")
     weights /= weights.sum()
     family_mass: dict[str, float] = {}
+    family_draws: dict[str, list[tuple[ModelDraw, float]]] = {}
     for draw, weight in zip(draws, weights):
-        family_mass[draw.family_name] = family_mass.get(draw.family_name, 0.0) + float(weight)
-    return {"family": dict(sorted(family_mass.items()))}
+        weight = float(weight)
+        family_mass[draw.family_name] = family_mass.get(draw.family_name, 0.0) + weight
+        family_draws.setdefault(draw.family_name, []).append((draw, weight))
+
+    parameter_mass: dict[str, dict[str, dict[Any, float]]] = {}
+    for family_name, entries in family_draws.items():
+        conditional_mass: dict[str, dict[Any, float]] = {}
+        family_weight = family_mass[family_name]
+        for draw, weight in entries:
+            for parameter_name, value in draw.parameters.items():
+                try:
+                    hash(value)
+                    key = value
+                except TypeError:
+                    key = repr(value)
+                values = conditional_mass.setdefault(parameter_name, {})
+                values[key] = values.get(key, 0.0) + weight / family_weight
+        parameter_mass[family_name] = {
+            parameter_name: dict(sorted(values.items(), key=lambda item: repr(item[0])))
+            for parameter_name, values in sorted(conditional_mass.items())
+        }
+
+    return {
+        "family": dict(sorted(family_mass.items())),
+        "parameter": dict(sorted(parameter_mass.items())),
+    }

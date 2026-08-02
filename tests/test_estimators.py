@@ -179,7 +179,13 @@ def test_default_registry_contains_built_in_families(data):
         draw["family_prior_probability"] == pytest.approx(1 / 3)
         for draw in estimator.get_model_draws()
     )
-    assert np.isclose(sum(estimator.get_model_masses()["family"].values()), 1.0)
+    masses = estimator.get_model_masses()
+    assert np.isclose(sum(masses["family"].values()), 1.0)
+    assert np.isclose(
+        sum(masses["parameter"]["gaussian"]["covariance_structure"].values()),
+        1.0,
+    )
+    assert np.isclose(sum(masses["parameter"]["knn"]["n_neighbors"].values()), 1.0)
 
 
 def test_explicit_family_weights_are_normalized(data):

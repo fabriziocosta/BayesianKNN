@@ -449,6 +449,30 @@ def format_convergence_history(result: Classification2DResult) -> str:
     return "\n".join(lines)
 
 
+def format_family_parameter_masses(
+    result: Classification2DResult,
+    family_name: str,
+    parameter_name: str,
+    label: str,
+    *,
+    max_items: int | None = None,
+) -> str:
+    """Format conditional posterior masses for one sampled parameter."""
+
+    values = result.model_masses["parameter"].get(family_name, {}).get(parameter_name, {})
+    if not values:
+        return f"{label}: unavailable"
+    items = sorted(values.items(), key=lambda item: (-item[1], repr(item[0])))
+    remaining = 0.0
+    if max_items is not None and len(items) > max_items:
+        items, omitted = items[:max_items], items[max_items:]
+        remaining = sum(mass for _, mass in omitted)
+    formatted = ", ".join(f"{value}={mass:.3f}" for value, mass in items)
+    if remaining:
+        formatted += f", other={remaining:.3f}"
+    return f"{label}: {formatted}"
+
+
 def _class_probability_index(result: Classification2DResult, class_label: Any | None) -> int:
     label = result.probability_class if class_label is None else class_label
     matches = np.flatnonzero(result.model.classes_ == label)
