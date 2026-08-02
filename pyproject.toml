@@ -1,0 +1,42 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "bayesian-knn"
+version = "0.1.0"
+description = "Bayesian Monte Carlo model averaging for k-nearest-neighbours classifiers and regressors"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "BayesianKNN contributors" }]
+dependencies = [
+    "joblib>=1.2",
+    "numpy>=1.23.5",
+    "scikit-learn>=1.2",
+    "scipy>=1.9",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+]
+dev = [
+    "bayesian-knn[test]",
+    "ruff>=0.6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["bayesian_knn"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
