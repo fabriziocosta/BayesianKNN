@@ -805,6 +805,7 @@ def plot_probability_heatmap(
         ax.set_title("Class probability mixture")
         ax.set_xlabel("Feature 1")
         ax.set_ylabel("Feature 2")
+        ax.set_aspect("equal", adjustable="box")
         ax.legend(loc="upper right")
         fig.suptitle(
             f"Bayesian model averaging on {result.dataset}\n"
@@ -863,6 +864,7 @@ def plot_probability_heatmap(
         ax.set_title(f"Class {label} probability")
         ax.set_xlabel("Feature 1")
         ax.set_ylabel("Feature 2")
+        ax.set_aspect("equal", adjustable="box")
         ax.legend(loc="upper right")
     fig.suptitle(
         f"Bayesian model averaging on {result.dataset}\n"
