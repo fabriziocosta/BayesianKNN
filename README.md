@@ -20,6 +20,9 @@ Available estimators:
 - `BayesianKNNClassifier`, including `predict_proba()`
 - `BayesianKNNRegressor`
 
+The default mixed representation compares identity, Gaussian-projection, and
+sparse-projection k-NN models using cross-validated pseudo-posterior weights.
+
 The full design and implementation documentation is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 For development:

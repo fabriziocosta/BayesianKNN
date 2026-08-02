@@ -40,7 +40,7 @@ class BayesianKNNBase(BaseEstimator):
 
     def __init__(
         self,
-        representation: str = "gaussian",
+        representation: str = "mixed",
         scale_prior: LogisticScalePrior | None = None,
         min_subset_size: int | None = None,
         max_subset_size: int | None = None,
@@ -77,8 +77,10 @@ class BayesianKNNBase(BaseEstimator):
         self.random_state = random_state
 
     def _validate_parameters(self) -> None:
-        if self.representation not in {"gaussian", "sparse", "identity"}:
-            raise ValueError("representation must be 'gaussian', 'sparse', or 'identity'")
+        if self.representation not in {"gaussian", "sparse", "identity", "mixed"}:
+            raise ValueError(
+                "representation must be 'mixed', 'gaussian', 'sparse', or 'identity'"
+            )
         if self.weights not in {"uniform", "distance"}:
             raise ValueError("weights must be 'uniform' or 'distance'")
         if self.n_estimators != "auto" and (

@@ -79,6 +79,26 @@ def test_regressor_accepts_csr_inputs(data):
     assert np.all(np.isfinite(prediction))
 
 
+def test_mixed_representation_samples_identity_and_projection_families(data):
+    X, y, _ = data
+    estimator = BayesianKNNClassifier(
+        **{
+            **estimator_kwargs(),
+            "representation": "mixed",
+            "n_estimators": 20,
+        }
+    ).fit(X, y)
+    draws = estimator.get_model_draws()
+    families = {draw["representation_family"] for draw in draws}
+    assert families == {"identity", "gaussian", "sparse"}
+    assert all(
+        draw["representation_family_probability"] == pytest.approx(1 / 3)
+        for draw in draws
+    )
+    identity_draws = [draw for draw in draws if draw["representation_family"] == "identity"]
+    assert all(draw["projection_dimension"] == X.shape[1] for draw in identity_draws)
+
+
 def test_parallel_and_serial_draws_are_reproducible(data):
     X, y, _ = data
     serial = BayesianKNNClassifier(**estimator_kwargs()).fit(X, y)

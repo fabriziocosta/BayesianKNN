@@ -28,6 +28,7 @@ class ModelDraw:
     projection_dimension: int
     projection_parameters: dict[str, Any]
     representation_object: Any = field(repr=False)
+    representation_family_probability: float = 1.0
     subset_size: int = 0
     subset_indices: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
     neighborhood_size: int = 0
@@ -47,6 +48,7 @@ class ModelDraw:
     def to_dict(self) -> dict[str, Any]:
         return {
             "representation_family": self.representation_family,
+            "representation_family_probability": self.representation_family_probability,
             "projection_dimension": self.projection_dimension,
             "projection_parameters": dict(self.projection_parameters),
             "subset_size": self.subset_size,

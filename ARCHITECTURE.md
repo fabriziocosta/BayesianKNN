@@ -53,7 +53,7 @@ The algorithm has three independent modules.
 
 ### 1. Representation module
 
-This module transforms the feature space. The default implementation is a **random projection**.
+This module transforms the feature space. The default implementation is a **mixed representation family** that includes random projections and the identity representation.
 
 The representation module is independent of the prediction module. Its purpose is simply to generate alternative representations of the input space.
 
@@ -75,7 +75,12 @@ Initially implement:
 - sparse random projection;
 - identity projection (no projection).
 
-The projection family is selected by an estimator parameter and is fixed for all Monte Carlo draws. A family prior is intentionally out of scope; if mixed families are added later, their prior probabilities must be specified and stored explicitly.
+The estimator parameter `representation` accepts `"gaussian"`, `"sparse"`,
+`"identity"`, or `"mixed"`. The fixed-family modes use the selected family for
+every Monte Carlo draw. The default `"mixed"` mode samples uniformly from all
+three families, with family probability `1/3` recorded in every model draw.
+Cross-validated pseudo-likelihoods determine the model weights, so the identity
+family can retain its full feature space when compression is not predictive.
 
 ### 2. Prediction module
 
@@ -89,7 +94,8 @@ This module performs Monte Carlo sampling over complete models.
 
 Each Monte Carlo draw samples:
 
-- representation parameters within the configured representation family;
+- a representation family when `representation="mixed"`;
+- representation parameters within the selected representation family;
 - subset size;
 - subset;
 - neighbourhood size.
@@ -130,7 +136,9 @@ Install the package and its runtime dependencies with:
 python -m pip install .
 ~~~
 
-The estimators use Gaussian random projections, distance-weighted Euclidean k-NN, five-fold cross-validation, and automatic Monte Carlo growth by default. For a small deterministic run:
+The estimators use a mixed representation family, distance-weighted Euclidean
+k-NN, five-fold cross-validation, and automatic Monte Carlo growth by default.
+For a small deterministic run:
 
 ~~~python
 from bayesian_knn import BayesianKNNClassifier
@@ -293,7 +301,16 @@ For Gaussian and sparse random projections, use:
 values = range(1, n_features + 1)
 ~~~
 
-For identity, use `values = [n_features]`. The representation module asks the scale prior for one projected dimension using the family-specific allowable values below. Identity never truncates or otherwise changes the feature space.
+For identity, use `values = [n_features]`. The representation module asks the
+scale prior for one projected dimension using the family-specific allowable
+values below. Identity never truncates or otherwise changes the feature space.
+
+When `representation="mixed"`, first sample the family uniformly from
+`("gaussian", "sparse", "identity")`. Store that family probability and add
+its log probability to the model's recorded prior. Because models are sampled
+directly from this declared prior, the default self-normalized weights still
+use the cross-validated pseudo-likelihood alone; do not multiply the family
+probability into the weights a second time.
 
 The projection dimension is a latent variable. For normalized position `u`, the representation-specific form is:
 
@@ -441,13 +458,14 @@ without changing the representation, sampling, scoring, or prediction modules.
 
 One draw samples:
 
-1. projection dimension within the configured representation family;
-2. projection matrix;
-3. subset logistic parameters;
-4. subset size;
-5. subset indices;
-6. neighbourhood logistic parameters;
-7. neighbourhood size.
+1. representation family when using the mixed mode;
+2. projection dimension within the selected representation family;
+3. projection matrix or identity transform;
+4. subset logistic parameters;
+5. subset size;
+6. subset indices;
+7. neighbourhood logistic parameters;
+8. neighbourhood size.
 
 The transformed subset is then fitted with weighted k-NN. Every sampled parameter is retained.
 
@@ -702,6 +720,7 @@ n_jobs=1
 Each sampled model stores:
 
 - representation family;
+- representation family probability;
 - projection dimension;
 - projection parameters;
 - subset size;

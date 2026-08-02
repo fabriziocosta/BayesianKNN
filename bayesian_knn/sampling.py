@@ -17,6 +17,8 @@ from .priors import LogisticScalePrior
 from .representation import make_representation
 from .scoring import classification_cv_score, regression_cv_score
 
+REPRESENTATION_FAMILIES = ("gaussian", "sparse", "identity")
+
 
 @dataclass(frozen=True)
 class SubsetSample:
@@ -33,6 +35,7 @@ class PreparedModel:
     projection_dimension: int
     projection_parameters: dict[str, Any]
     representation_object: Any
+    representation_family_probability: float
     subset_size: int
     subset_indices: np.ndarray
     subset_log_probability: float
@@ -177,9 +180,22 @@ def prepare_model(
 ) -> PreparedModel:
     rng = np.random.default_rng(seed)
     n_features = int(X.shape[1])
-    projection_values = [n_features] if representation == "identity" else range(1, n_features + 1)
+    if representation == "mixed":
+        representation_family = str(rng.choice(REPRESENTATION_FAMILIES))
+        representation_family_probability = 1.0 / len(REPRESENTATION_FAMILIES)
+    elif representation in REPRESENTATION_FAMILIES:
+        representation_family = representation
+        representation_family_probability = 1.0
+    else:
+        choices = ", ".join((*REPRESENTATION_FAMILIES, "mixed"))
+        raise ValueError(f"representation must be one of: {choices}")
+    projection_values = (
+        [n_features]
+        if representation_family == "identity"
+        else range(1, n_features + 1)
+    )
     projection_draw = scale_prior.draw(projection_values, rng)
-    projection = make_representation(representation, projection_draw.value, seed)
+    projection = make_representation(representation_family, projection_draw.value, seed)
     sampled_projection_parameters = projection.sample_parameters(seed)
     transformed = projection.fit_transform(X)
 
@@ -202,10 +218,11 @@ def prepare_model(
 
     return PreparedModel(
         task=task,
-        representation_family=representation,
+        representation_family=representation_family,
         projection_dimension=projection_draw.value,
         projection_parameters={**sampled_projection_parameters, **projection.parameters()},
         representation_object=projection,
+        representation_family_probability=representation_family_probability,
         subset_size=subset_draw.value,
         subset_indices=subset.indices,
         subset_log_probability=subset.log_probability,
@@ -268,7 +285,8 @@ def fit_prepared_model(prepared: PreparedModel, cv_score: float) -> ModelDraw:
         )
     estimator.fit(prepared.X_subset, prepared.y_subset)
     log_prior = (
-        prepared.projection_scale_draw.log_probability
+        np.log(prepared.representation_family_probability)
+        + prepared.projection_scale_draw.log_probability
         + prepared.subset_scale_draw.log_probability
         + prepared.neighbor_scale_draw.log_probability
         + prepared.subset_log_probability
@@ -278,6 +296,7 @@ def fit_prepared_model(prepared: PreparedModel, cv_score: float) -> ModelDraw:
         projection_dimension=prepared.projection_dimension,
         projection_parameters=prepared.projection_parameters,
         representation_object=prepared.representation_object,
+        representation_family_probability=prepared.representation_family_probability,
         subset_size=prepared.subset_size,
         subset_indices=prepared.subset_indices,
         neighborhood_size=prepared.neighborhood_size,
