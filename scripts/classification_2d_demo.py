@@ -8,7 +8,6 @@ from typing import Any
 from bayesian_model_averaging.experiments.classification_2d import (
     Classification2DResult,
     format_convergence_history,
-    format_family_draw_frequencies,
     format_family_parameter_shares,
     run_2d_classification_experiment,
 )
@@ -34,7 +33,6 @@ def run_and_report(
         print(f"test accuracy: {result.test_accuracy:.3f}")
         print(f"estimators used: {result.model.n_estimators_}")
         print(f"converged: {result.model.converged_}")
-        print(format_family_draw_frequencies(result))
         family_shares = ", ".join(
             f"{name}={share:.3f}"
             for name, share in result.model_masses["family"].items()

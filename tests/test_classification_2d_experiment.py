@@ -2,7 +2,6 @@ import numpy as np
 import pytest
 
 from bayesian_model_averaging.experiments.classification_2d import (
-    format_family_draw_frequencies,
     make_2d_dataset,
     plot_probability_heatmap,
     run_2d_classification_experiment,
@@ -97,19 +96,6 @@ def test_blobs_expose_center_and_spread_controls():
         make_2d_dataset("blobs", n_classes=3, blob_center_radius=0)
     with pytest.raises(ValueError, match="cluster_standard_deviation"):
         make_2d_dataset("blobs", n_classes=3, blob_cluster_standard_deviation=0)
-
-
-def test_family_draw_frequency_report_includes_counts():
-    result = run_2d_classification_experiment(
-        "moon",
-        dataset_parameters={"n_samples": 80},
-        test_size=0.25,
-        model_parameters=_small_model_parameters(),
-    )
-    report = format_family_draw_frequencies(result)
-    assert report.startswith("family draw frequencies: ")
-    assert f"/{result.model.n_estimators_}" in report
-    assert all(family in report for family in ("gaussian", "knn", "linear"))
 
 
 def test_multiclass_plot_uses_one_mixed_probability_panel():

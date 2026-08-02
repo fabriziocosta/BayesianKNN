@@ -449,25 +449,6 @@ def format_convergence_history(result: Classification2DResult) -> str:
     return "\n".join(lines)
 
 
-def format_family_draw_frequencies(result: Classification2DResult) -> str:
-    """Format raw family draw counts and their relative frequencies."""
-
-    draws = result.model.get_model_draws()
-    counts = {
-        registration.adapter.name: 0
-        for registration in result.model.family_registry_
-    }
-    for draw in draws:
-        family_name = draw["family_name"]
-        counts[family_name] = counts.get(family_name, 0) + 1
-    total = len(draws)
-    formatted = ", ".join(
-        f"{name}={count / total:.3f} ({count}/{total})"
-        for name, count in sorted(counts.items())
-    )
-    return f"family draw frequencies: {formatted}"
-
-
 def format_family_parameter_shares(
     result: Classification2DResult,
     family_name: str,
