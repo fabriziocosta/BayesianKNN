@@ -145,9 +145,10 @@ class BayesianKNNBase(BaseEstimator):
         self._task = task
         self._X_fit_shape = X.shape
         convergence_rng = np.random.default_rng(child_seed(self._base_seed, -1))
-        convergence_size = min(int(self.convergence_size), len(X))
+        n_samples = int(X.shape[0])
+        convergence_size = min(int(self.convergence_size), n_samples)
         self.convergence_subset_indices_ = np.sort(
-            convergence_rng.choice(len(X), size=convergence_size, replace=False)
+            convergence_rng.choice(n_samples, size=convergence_size, replace=False)
         )
         self.convergence_history_ = []
 

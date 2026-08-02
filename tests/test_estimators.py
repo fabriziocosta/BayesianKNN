@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+from scipy.sparse import csr_matrix
 from sklearn.base import clone
 from sklearn.model_selection import GridSearchCV
 from sklearn.pipeline import make_pipeline
@@ -50,6 +51,32 @@ def test_regressor_predicts_and_scores(data):
     assert prediction.shape == (5,)
     assert np.all(np.isfinite(prediction))
     assert np.isfinite(estimator.score(X, y))
+
+
+@pytest.mark.parametrize("representation", ["identity", "gaussian", "sparse"])
+def test_classifier_accepts_csr_inputs_for_all_representations(data, representation):
+    X, y, _ = data
+    X_sparse = csr_matrix(X)
+    estimator = BayesianKNNClassifier(
+        **{
+            **estimator_kwargs(),
+            "representation": representation,
+        }
+    ).fit(X_sparse, y)
+
+    probabilities = estimator.predict_proba(X_sparse[:5])
+    assert probabilities.shape == (5, 3)
+    assert np.allclose(probabilities.sum(axis=1), 1.0)
+
+
+def test_regressor_accepts_csr_inputs(data):
+    X, _, y = data
+    X_sparse = csr_matrix(X)
+    estimator = BayesianKNNRegressor(**estimator_kwargs()).fit(X_sparse, y)
+
+    prediction = estimator.predict(X_sparse[:5])
+    assert prediction.shape == (5,)
+    assert np.all(np.isfinite(prediction))
 
 
 def test_parallel_and_serial_draws_are_reproducible(data):
