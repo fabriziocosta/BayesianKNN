@@ -66,11 +66,9 @@ def _make_models(
     svm_parameters: dict[str, Any] | None,
 ) -> dict[str, Any]:
     bayesian_options = {
-        "model_family": "mixed",
         "representation": "mixed",
         "n_estimators": 20,
         "cv": 5,
-        "weights": "distance",
         "n_jobs": 1,
         "random_state": random_state,
     }

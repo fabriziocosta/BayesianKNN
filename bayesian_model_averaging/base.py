@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
@@ -11,13 +12,13 @@ from sklearn.utils import check_array, check_X_y
 from sklearn.utils.validation import check_is_fitted
 
 from .convergence import compare_predictions, convergence_difference
-from .models import ModelDraw, aggregate_model_masses
-from .priors import (
-    GaussianCovariancePrior,
-    LogisticScalePrior,
-    make_gaussian_covariance_prior,
-    make_scale_prior,
+from .adapters import (
+    EstimatorFamilyAdapter,
+    FamilyRegistration,
+    normalize_family_registry,
 )
+from .models import ModelDraw, aggregate_model_masses
+from .priors import LogisticScalePrior, make_scale_prior
 from .sampling import (
     feasible_subset_sizes,
     fit_prepared_model,
@@ -46,14 +47,10 @@ class BayesianModelAveragingBase(BaseEstimator):
     def __init__(
         self,
         representation: str = "mixed",
-        model_family: str = "mixed",
+        family_registry: Sequence[FamilyRegistration | EstimatorFamilyAdapter] | None = None,
         scale_prior: LogisticScalePrior | None = None,
-        gaussian_covariance_prior: GaussianCovariancePrior | None = None,
         min_subset_size: int | None = None,
         max_subset_size: int | None = None,
-        max_neighbors: int | None = None,
-        weights: str = "distance",
-        metric: str = "euclidean",
         cv: int | Any = 5,
         n_estimators: int | str = "auto",
         max_estimators: int = 1280,
@@ -67,14 +64,10 @@ class BayesianModelAveragingBase(BaseEstimator):
         random_state: Any = None,
     ) -> None:
         self.representation = representation
-        self.model_family = model_family
+        self.family_registry = family_registry
         self.scale_prior = scale_prior
-        self.gaussian_covariance_prior = gaussian_covariance_prior
         self.min_subset_size = min_subset_size
         self.max_subset_size = max_subset_size
-        self.max_neighbors = max_neighbors
-        self.weights = weights
-        self.metric = metric
         self.cv = cv
         self.n_estimators = n_estimators
         self.max_estimators = max_estimators
@@ -92,10 +85,6 @@ class BayesianModelAveragingBase(BaseEstimator):
             raise ValueError(
                 "representation must be 'mixed', 'gaussian', 'sparse', or 'identity'"
             )
-        if self.model_family not in {"knn", "linear", "gaussian", "mixed"}:
-            raise ValueError("model_family must be 'knn', 'linear', 'gaussian', or 'mixed'")
-        if self.weights not in {"uniform", "distance"}:
-            raise ValueError("weights must be 'uniform' or 'distance'")
         if self.n_estimators != "auto" and (
             isinstance(self.n_estimators, bool)
             or not isinstance(self.n_estimators, (int, np.integer))
@@ -120,11 +109,7 @@ class BayesianModelAveragingBase(BaseEstimator):
             raise ValueError("epsilon must be finite and positive")
         if not np.isfinite(self.temperature) or self.temperature <= 0:
             raise ValueError("temperature must be finite and positive")
-        for name, value in (
-            ("min_subset_size", self.min_subset_size),
-            ("max_subset_size", self.max_subset_size),
-            ("max_neighbors", self.max_neighbors),
-        ):
+        for name, value in (("min_subset_size", self.min_subset_size), ("max_subset_size", self.max_subset_size)):
             if value is not None and (
                 isinstance(value, bool)
                 or not isinstance(value, (int, np.integer))
@@ -158,9 +143,16 @@ class BayesianModelAveragingBase(BaseEstimator):
             raise ValueError("no admissible subset size exists for this dataset and CV setup")
 
         self.scale_prior_ = make_scale_prior(self.scale_prior)
-        self.gaussian_covariance_prior_ = make_gaussian_covariance_prior(
-            self.gaussian_covariance_prior
-        )
+        self.family_registry_ = normalize_family_registry(self.family_registry)
+        unsupported = [
+            registration.adapter.name
+            for registration in self.family_registry_
+            if task not in registration.adapter.supported_tasks
+        ]
+        if unsupported:
+            raise ValueError(
+                f"registered adapters do not support task {task!r}: {', '.join(unsupported)}"
+            )
         self._base_seed = base_seed(self.random_state)
         self._task = task
         self._X_fit_shape = X.shape
@@ -222,8 +214,7 @@ class BayesianModelAveragingBase(BaseEstimator):
             X,
             y,
             task=self._task,
-            model_family=self.model_family,
-            gaussian_covariance_prior=self.gaussian_covariance_prior_,
+            family_registry=self.family_registry_,
             representation=self.representation,
             scale_prior=self.scale_prior_,
             min_subset_size=(
@@ -238,9 +229,6 @@ class BayesianModelAveragingBase(BaseEstimator):
             max_subset_size=(
                 int(self.max_subset_size) if self.max_subset_size is not None else len(y)
             ),
-            max_neighbors=self.max_neighbors,
-            weights=self.weights,
-            metric=self.metric,
             cv=self.cv,
             alpha=self.alpha,
             epsilon=self.epsilon,
@@ -286,13 +274,7 @@ class BayesianModelAveragingBase(BaseEstimator):
         return [model.to_dict() for model in self._models]
 
     def get_model_masses(self) -> dict[str, Any]:
-        """Return posterior mass by model family and family-specific choice.
-
-        Family-specific ``*_size`` and ``*_structure`` masses are joint masses
-        on the full ensemble and therefore sum to their parent family mass.
-        The corresponding ``*_conditional`` mappings normalize within that
-        family and sum to one whenever the family has positive mass.
-        """
+        """Return posterior mass by the dynamically registered family names."""
 
         check_is_fitted(self, "_models")
         return aggregate_model_masses(self._models)

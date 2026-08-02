@@ -1,0 +1,397 @@
+"""Estimator-family adapters and the built-in adapter registry."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any, Protocol, runtime_checkable
+
+import numpy as np
+from sklearn.base import BaseEstimator
+from sklearn.linear_model import BayesianRidge, LogisticRegression, Ridge
+from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+from sklearn.neural_network import MLPClassifier, MLPRegressor
+
+from .model_families import GaussianClassifier
+from .priors import (
+    CategoricalPrior,
+    GaussianCovariancePrior,
+    LogUniformPrior,
+    ParameterDraw,
+    ScalePriorDraw,
+    SimplicityCategoricalPrior,
+)
+
+
+@dataclass(frozen=True)
+class SamplingContext:
+    """Dataset and CV facts available while an adapter samples parameters."""
+
+    task: str
+    n_features: int
+    n_classes: int | None
+    n_samples: int
+    subset_size: int
+    min_train_size: int
+    classes: np.ndarray | None
+    scale_prior: Any
+
+
+@runtime_checkable
+class EstimatorFamilyAdapter(Protocol):
+    """Protocol implemented by one pluggable predictive model family."""
+
+    name: str
+    supported_tasks: frozenset[str]
+    supported_representations: frozenset[str]
+
+    def sample_parameters(
+        self,
+        context: SamplingContext,
+        rng: np.random.Generator,
+    ) -> ParameterDraw:
+        ...
+
+    def build_estimator(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+        random_state: int,
+    ) -> BaseEstimator:
+        ...
+
+    def predictive_concentration(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+    ) -> float:
+        ...
+
+
+@dataclass(frozen=True)
+class FamilyRegistration:
+    """An adapter together with its prior mass in the family mixture."""
+
+    adapter: EstimatorFamilyAdapter
+    prior_weight: float = 1.0
+
+
+def _scale_draw_metadata(draw: ScalePriorDraw) -> dict[str, Any]:
+    return {
+        "value": draw.value,
+        "index": draw.index,
+        "beta": draw.beta,
+        "cutoff": draw.cutoff,
+        "probability": draw.probability,
+        "log_probability": draw.log_probability,
+        "probabilities": tuple(draw.probabilities),
+    }
+
+
+def _categorical_metadata(
+    value: Any,
+    log_probability: float,
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "value": value,
+        "probability": float(np.exp(log_probability)),
+        "log_probability": log_probability,
+        **metadata,
+    }
+
+
+class KNNAdapter(BaseEstimator):
+    """Adapter for weighted k-nearest-neighbour classifiers and regressors."""
+
+    name = "knn"
+    supported_tasks = frozenset({"classification", "regression"})
+    supported_representations = frozenset({"identity", "gaussian", "sparse"})
+
+    def __init__(
+        self,
+        weights: str = "distance",
+        metric: str = "euclidean",
+        max_neighbors: int | None = None,
+    ) -> None:
+        self.weights = weights
+        self.metric = metric
+        self.max_neighbors = max_neighbors
+
+    def sample_parameters(
+        self,
+        context: SamplingContext,
+        rng: np.random.Generator,
+    ) -> ParameterDraw:
+        k_max = context.min_train_size
+        if self.max_neighbors is not None:
+            k_max = min(k_max, int(self.max_neighbors))
+        if k_max < 1:
+            raise ValueError("max_neighbors leaves no valid neighbourhood size")
+        draw = context.scale_prior.draw(range(1, k_max + 1), rng)
+        return ParameterDraw(
+            parameters={
+                "n_neighbors": draw.value,
+                "weights": self.weights,
+                "metric": self.metric,
+            },
+            log_probability=draw.log_probability,
+            metadata={"neighborhood_scale_draw": _scale_draw_metadata(draw)},
+        )
+
+    def build_estimator(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+        random_state: int,
+    ) -> BaseEstimator:
+        estimator_class = KNeighborsClassifier if task == "classification" else KNeighborsRegressor
+        return estimator_class(
+            n_neighbors=int(parameters["n_neighbors"]),
+            weights=str(parameters["weights"]),
+            metric=parameters["metric"],
+            n_jobs=1,
+        )
+
+    def predictive_concentration(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+    ) -> float:
+        return float(parameters["n_neighbors"]) if task == "classification" else 1.0
+
+
+class LinearAdapter(BaseEstimator):
+    """Adapter for logistic classification and ridge regression."""
+
+    name = "linear"
+    supported_tasks = frozenset({"classification", "regression"})
+    supported_representations = frozenset({"identity"})
+
+    def sample_parameters(
+        self,
+        context: SamplingContext,
+        rng: np.random.Generator,
+    ) -> ParameterDraw:
+        if context.task == "classification":
+            parameters = {"solver": "lbfgs", "max_iter": 2000}
+        else:
+            parameters = {"alpha": 1.0}
+        return ParameterDraw(parameters=parameters, log_probability=0.0, metadata={})
+
+    def build_estimator(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+        random_state: int,
+    ) -> BaseEstimator:
+        if task == "classification":
+            return LogisticRegression(
+                solver=str(parameters["solver"]),
+                max_iter=int(parameters["max_iter"]),
+                random_state=random_state,
+            )
+        return Ridge(alpha=float(parameters["alpha"]))
+
+    def predictive_concentration(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+    ) -> float:
+        return 1.0
+
+
+class GaussianAdapter(BaseEstimator):
+    """Adapter for Gaussian classification and Bayesian ridge regression."""
+
+    name = "gaussian"
+    supported_tasks = frozenset({"classification", "regression"})
+    supported_representations = frozenset({"identity"})
+
+    def __init__(self, covariance_prior: GaussianCovariancePrior | None = None) -> None:
+        self.covariance_prior = covariance_prior
+
+    def sample_parameters(
+        self,
+        context: SamplingContext,
+        rng: np.random.Generator,
+    ) -> ParameterDraw:
+        if context.task != "classification":
+            return ParameterDraw(parameters={}, log_probability=0.0, metadata={})
+        prior = self.covariance_prior or GaussianCovariancePrior()
+        draw = prior.draw(context.n_features, rng)
+        return ParameterDraw(
+            parameters={"covariance_structure": draw.value},
+            log_probability=draw.log_probability,
+            metadata={
+                "covariance_draw": {
+                    "value": draw.value,
+                    "probability": draw.probability,
+                    "log_probability": draw.log_probability,
+                    "probabilities": tuple(draw.probabilities),
+                }
+            },
+        )
+
+    def build_estimator(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+        random_state: int,
+    ) -> BaseEstimator:
+        if task == "classification":
+            return GaussianClassifier(str(parameters["covariance_structure"]))
+        return BayesianRidge()
+
+    def predictive_concentration(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+    ) -> float:
+        return 1.0
+
+
+class MLPAdapter(BaseEstimator):
+    """Adapter with simplicity priors over small neural-network architectures."""
+
+    name = "mlp"
+    supported_tasks = frozenset({"classification", "regression"})
+    supported_representations = frozenset({"identity"})
+
+    def __init__(
+        self,
+        hidden_layer_sizes: Sequence[tuple[int, ...]] | None = None,
+        activations: Sequence[str] = ("relu", "tanh", "logistic"),
+        alpha_prior: LogUniformPrior | None = None,
+        learning_rate_prior: LogUniformPrior | None = None,
+        max_iter: int = 500,
+    ) -> None:
+        self.hidden_layer_sizes = hidden_layer_sizes
+        self.activations = tuple(activations)
+        self.alpha_prior = alpha_prior
+        self.learning_rate_prior = learning_rate_prior
+        self.max_iter = max_iter
+
+    def _architecture_prior(self) -> CategoricalPrior:
+        architectures = self.hidden_layer_sizes or ((16,), (32,), (64,), (32, 16))
+        complexities = [sum(architecture) for architecture in architectures]
+        return SimplicityCategoricalPrior(architectures, complexities)
+
+    def sample_parameters(
+        self,
+        context: SamplingContext,
+        rng: np.random.Generator,
+    ) -> ParameterDraw:
+        architecture_prior = self._architecture_prior()
+        architecture, architecture_log_probability, architecture_metadata = architecture_prior.draw(
+            rng
+        )
+        activation_prior = CategoricalPrior(self.activations)
+        activation, activation_log_probability, activation_metadata = activation_prior.draw(rng)
+        alpha_prior = self.alpha_prior or LogUniformPrior(1e-6, 1e-1)
+        learning_rate_prior = self.learning_rate_prior or LogUniformPrior(1e-4, 1e-1)
+        alpha, alpha_log_probability, alpha_metadata = alpha_prior.draw(rng)
+        learning_rate, learning_rate_log_probability, learning_rate_metadata = (
+            learning_rate_prior.draw(rng)
+        )
+        return ParameterDraw(
+            parameters={
+                "hidden_layer_sizes": tuple(architecture),
+                "activation": str(activation),
+                "alpha": alpha,
+                "learning_rate_init": learning_rate,
+                "max_iter": int(self.max_iter),
+                "solver": "adam",
+            },
+            log_probability=float(
+                architecture_log_probability
+                + activation_log_probability
+                + alpha_log_probability
+                + learning_rate_log_probability
+            ),
+            metadata={
+                "hidden_layer_sizes": _categorical_metadata(
+                    architecture, architecture_log_probability, architecture_metadata
+                ),
+                "activation": _categorical_metadata(
+                    activation, activation_log_probability, activation_metadata
+                ),
+                "alpha": {
+                    "value": alpha,
+                    "log_probability": alpha_log_probability,
+                    **alpha_metadata,
+                },
+                "learning_rate_init": {
+                    "value": learning_rate,
+                    "log_probability": learning_rate_log_probability,
+                    **learning_rate_metadata,
+                },
+            },
+        )
+
+    def build_estimator(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+        random_state: int,
+    ) -> BaseEstimator:
+        estimator_class = MLPClassifier if task == "classification" else MLPRegressor
+        return estimator_class(
+            hidden_layer_sizes=tuple(parameters["hidden_layer_sizes"]),
+            activation=str(parameters["activation"]),
+            alpha=float(parameters["alpha"]),
+            learning_rate_init=float(parameters["learning_rate_init"]),
+            max_iter=int(parameters["max_iter"]),
+            solver=str(parameters["solver"]),
+            random_state=random_state,
+        )
+
+    def predictive_concentration(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+    ) -> float:
+        return 1.0
+
+
+def default_family_registry() -> tuple[FamilyRegistration, ...]:
+    """Return the default built-in family mixture."""
+
+    return tuple(
+        FamilyRegistration(adapter, prior_weight=1.0)
+        for adapter in (KNNAdapter(), LinearAdapter(), GaussianAdapter(), MLPAdapter())
+    )
+
+
+def normalize_family_registry(
+    registry: Sequence[FamilyRegistration | EstimatorFamilyAdapter] | None,
+) -> tuple[FamilyRegistration, ...]:
+    """Validate and normalize a user-supplied runtime family registry."""
+
+    registrations = default_family_registry() if registry is None else tuple(registry)
+    if not registrations:
+        raise ValueError("family_registry must contain at least one adapter")
+    normalized: list[FamilyRegistration] = []
+    names: set[str] = set()
+    for item in registrations:
+        registration = item if isinstance(item, FamilyRegistration) else FamilyRegistration(item)
+        adapter = registration.adapter
+        name = getattr(adapter, "name", None)
+        if not isinstance(name, str) or not name:
+            raise ValueError("each adapter must define a non-empty string name")
+        if name in names:
+            raise ValueError(f"duplicate estimator-family adapter name: {name}")
+        if not getattr(adapter, "supported_tasks", None):
+            raise ValueError(f"adapter {name!r} must declare supported_tasks")
+        if not getattr(adapter, "supported_representations", None):
+            raise ValueError(f"adapter {name!r} must declare supported_representations")
+        weight = float(registration.prior_weight)
+        if not np.isfinite(weight) or weight <= 0:
+            raise ValueError("family prior weights must be finite and positive")
+        names.add(name)
+        normalized.append(FamilyRegistration(adapter, weight))
+    total = sum(registration.prior_weight for registration in normalized)
+    return tuple(
+        FamilyRegistration(registration.adapter, registration.prior_weight / total)
+        for registration in normalized
+    )

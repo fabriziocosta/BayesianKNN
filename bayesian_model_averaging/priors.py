@@ -4,9 +4,130 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from scipy.special import logsumexp
+
+
+@dataclass(frozen=True)
+class ParameterDraw:
+    """One complete hyperparameter draw from an estimator-family prior."""
+
+    parameters: dict[str, Any]
+    log_probability: float
+    metadata: dict[str, Any]
+
+    @property
+    def probability(self) -> float:
+        return float(np.exp(self.log_probability))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "parameters": dict(self.parameters),
+            "probability": self.probability,
+            "log_probability": self.log_probability,
+            "metadata": dict(self.metadata),
+        }
+
+
+class CategoricalPrior:
+    """Categorical prior over a finite collection of values."""
+
+    def __init__(
+        self,
+        values: Sequence[Any],
+        probabilities: Sequence[float] | None = None,
+    ) -> None:
+        self.values = tuple(values)
+        if not self.values:
+            raise ValueError("values must be non-empty")
+        if probabilities is None:
+            probabilities_array = np.ones(len(self.values), dtype=float)
+        else:
+            probabilities_array = np.asarray(probabilities, dtype=float)
+            if probabilities_array.shape != (len(self.values),):
+                raise ValueError("probabilities must have one value per category")
+        if np.any(~np.isfinite(probabilities_array)) or np.any(probabilities_array <= 0):
+            raise ValueError("probabilities must be finite and positive")
+        probabilities_array /= probabilities_array.sum()
+        self.probabilities = tuple(float(value) for value in probabilities_array)
+
+    def get_params(self, deep: bool = True) -> dict[str, Any]:
+        return {"values": self.values, "probabilities": self.probabilities}
+
+    def draw(self, rng: np.random.Generator) -> tuple[Any, float, dict[str, Any]]:
+        index = int(rng.choice(len(self.values), p=self.probabilities))
+        probability = float(self.probabilities[index])
+        return (
+            self.values[index],
+            float(np.log(probability)),
+            {"index": index, "probabilities": self.probabilities},
+        )
+
+
+class IntegerChoicePrior(CategoricalPrior):
+    """Categorical prior specialized for a finite ordered integer choice set."""
+
+    def __init__(
+        self,
+        values: Sequence[int],
+        probabilities: Sequence[float] | None = None,
+    ) -> None:
+        if any(isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer))
+               for value in values):
+            raise ValueError("values must contain integers")
+        super().__init__(values, probabilities)
+
+
+class SimplicityCategoricalPrior(CategoricalPrior):
+    """Categorical prior with mass decreasing as declared complexity increases."""
+
+    def __init__(
+        self,
+        values: Sequence[Any],
+        complexities: Sequence[float],
+        simplicity: float = 1.0,
+    ) -> None:
+        complexity_array = np.asarray(complexities, dtype=float)
+        if len(values) != len(complexity_array):
+            raise ValueError("complexities must have one value per category")
+        if (
+            not np.isfinite(simplicity)
+            or simplicity <= 0
+            or np.any(~np.isfinite(complexity_array))
+            or np.any(complexity_array < 0)
+        ):
+            raise ValueError("simplicity and complexities must be finite and positive")
+        probabilities = np.exp(-float(simplicity) * np.log1p(complexity_array))
+        super().__init__(values, probabilities)
+        self.complexities = tuple(float(value) for value in complexity_array)
+        self.simplicity = float(simplicity)
+
+    def get_params(self, deep: bool = True) -> dict[str, Any]:
+        return {
+            "values": self.values,
+            "complexities": self.complexities,
+            "simplicity": self.simplicity,
+        }
+
+
+class LogUniformPrior:
+    """Continuous log-uniform prior over a positive interval."""
+
+    def __init__(self, low: float, high: float) -> None:
+        if not np.isfinite(low) or not np.isfinite(high) or low <= 0 or high <= low:
+            raise ValueError("low and high must be finite, positive, and low < high")
+        self.low = float(low)
+        self.high = float(high)
+
+    def get_params(self, deep: bool = True) -> dict[str, float]:
+        return {"low": self.low, "high": self.high}
+
+    def draw(self, rng: np.random.Generator) -> tuple[float, float, dict[str, Any]]:
+        value = float(np.exp(rng.uniform(np.log(self.low), np.log(self.high))))
+        log_probability = -np.log(value) - np.log(np.log(self.high / self.low))
+        return value, float(log_probability), {"low": self.low, "high": self.high}
 
 
 @dataclass(frozen=True)

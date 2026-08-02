@@ -7,8 +7,6 @@ from typing import Any
 import numpy as np
 from scipy.sparse import issparse
 from scipy.special import logsumexp
-from sklearn.linear_model import BayesianRidge, LogisticRegression, Ridge
-from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 
 
 def _dense(X: Any) -> np.ndarray:
@@ -70,36 +68,3 @@ class GaussianClassifier:
 
     def predict(self, X: Any) -> np.ndarray:
         return self.classes_[np.argmax(self.predict_log_proba(X), axis=1)]
-
-
-def make_model_estimator(
-    task: str,
-    model_family: str,
-    neighborhood_size: int | None,
-    weights: str,
-    metric: str,
-    covariance_structure: str | None,
-) -> Any:
-    """Construct one estimator for a sampled model family."""
-
-    if model_family == "knn":
-        if neighborhood_size is None:
-            raise ValueError("k-NN models require a neighborhood size")
-        estimator_class = KNeighborsClassifier if task == "classification" else KNeighborsRegressor
-        return estimator_class(
-            n_neighbors=neighborhood_size,
-            weights=weights,
-            metric=metric,
-            n_jobs=1,
-        )
-    if model_family == "linear":
-        if task == "classification":
-            return LogisticRegression(max_iter=2000, solver="lbfgs")
-        return Ridge(alpha=1.0)
-    if model_family == "gaussian":
-        if task == "classification":
-            if covariance_structure is None:
-                raise ValueError("Gaussian classifiers require a covariance structure")
-            return GaussianClassifier(covariance_structure)
-        return BayesianRidge()
-    raise ValueError("model_family must be knn, linear, gaussian, or mixed")

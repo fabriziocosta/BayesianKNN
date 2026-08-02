@@ -19,6 +19,7 @@ from sklearn.datasets import (
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 
+from ..adapters import FamilyRegistration, KNNAdapter
 from ..classifier import BayesianModelAveragingClassifier
 
 DEFAULT_MODEL_PARAMETERS: dict[str, Any] = {
@@ -28,8 +29,7 @@ DEFAULT_MODEL_PARAMETERS: dict[str, Any] = {
     "convergence_metric": "median",
     "convergence_size": 256,
     "cv": 5,
-    "max_neighbors": None,
-    "weights": "distance",
+    "family_registry": [FamilyRegistration(KNNAdapter(), 1.0)],
     "n_jobs": -1,
     "random_state": 12,
 }
@@ -535,16 +535,16 @@ def plot_probability_heatmap(
             vmax=1,
             alpha=0.90,
         )
+        ax.contour(
+            xx,
+            yy,
+            probability,
+            levels=[0.25, 0.75],
+            linewidths=1.4,
+            linestyles=":",
+            colors="black",
+        )
         if len(classes) == 2:
-            ax.contour(
-                xx,
-                yy,
-                probability,
-                levels=[0.25, 0.75],
-                linewidths=1.4,
-                linestyles=":",
-                colors="black",
-            )
             ax.contour(xx, yy, probability, levels=[0.5], linewidths=2, colors="black")
         else:
             boundaries = np.arange(0.5, len(classes) - 0.5, 1.0)

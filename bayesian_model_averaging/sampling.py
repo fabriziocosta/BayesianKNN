@@ -11,14 +11,17 @@ from scipy.special import gammaln, logsumexp
 from sklearn.base import clone
 from sklearn.model_selection import KFold, StratifiedKFold
 
-from .model_families import make_model_estimator
+from .adapters import (
+    EstimatorFamilyAdapter,
+    FamilyRegistration,
+    SamplingContext,
+)
 from .models import ModelDraw
-from .priors import GaussianCovarianceDraw, GaussianCovariancePrior, LogisticScalePrior
+from .priors import LogisticScalePrior, ParameterDraw
 from .representation import make_representation
 from .scoring import classification_cv_score, regression_cv_score
 
 REPRESENTATION_FAMILIES = ("gaussian", "sparse", "identity")
-MODEL_FAMILIES = ("knn", "linear", "gaussian")
 
 
 @dataclass(frozen=True)
@@ -32,31 +35,28 @@ class PreparedModel:
     """A sampled model before scoring and final fitting."""
 
     task: str
-    model_family: str
-    model_family_probability: float
+    family_name: str
+    family_adapter: EstimatorFamilyAdapter
+    family_prior_probability: float
+    parameters: dict[str, Any]
+    parameter_prior: ParameterDraw
     representation_family: str
     projection_dimension: int
     projection_parameters: dict[str, Any]
     representation_object: Any
     representation_family_probability: float
-    gaussian_covariance_structure: str | None
-    gaussian_covariance_probability: float
-    gaussian_covariance_draw: GaussianCovarianceDraw | None
     subset_size: int
     subset_indices: np.ndarray
     subset_log_probability: float
-    neighborhood_size: int | None
     projection_scale_draw: Any
     subset_scale_draw: Any
-    neighbor_scale_draw: Any
     X_subset: Any
     y_subset: np.ndarray
     splits: list[tuple[np.ndarray, np.ndarray]]
-    weights: str
-    metric: str
     alpha: float
     epsilon: float
     classes: np.ndarray | None
+    seed: int
 
 
 def n_splits_for_cv(cv: int | Any) -> int:
@@ -171,15 +171,11 @@ def prepare_model(
     y: np.ndarray,
     *,
     task: str,
-    model_family: str,
-    gaussian_covariance_prior: GaussianCovariancePrior,
+    family_registry: Sequence[FamilyRegistration],
     representation: str,
     scale_prior: LogisticScalePrior,
     min_subset_size: int,
     max_subset_size: int,
-    max_neighbors: int | None,
-    weights: str,
-    metric: str,
     cv: int | Any,
     alpha: float,
     epsilon: float,
@@ -188,24 +184,34 @@ def prepare_model(
 ) -> PreparedModel:
     rng = np.random.default_rng(seed)
     n_features = int(X.shape[1])
-    if model_family == "mixed":
-        selected_model_family = str(rng.choice(MODEL_FAMILIES))
-        model_family_probability = 1.0 / len(MODEL_FAMILIES)
-    elif model_family in MODEL_FAMILIES:
-        selected_model_family = model_family
-        model_family_probability = 1.0
-    else:
-        choices = ", ".join((*MODEL_FAMILIES, "mixed"))
-        raise ValueError(f"model_family must be one of: {choices}")
-    if selected_model_family == "knn" and representation == "mixed":
-        representation_family = str(rng.choice(REPRESENTATION_FAMILIES))
-        representation_family_probability = 1.0 / len(REPRESENTATION_FAMILIES)
-    elif selected_model_family == "knn" and representation in REPRESENTATION_FAMILIES:
+    family_index = int(
+        rng.choice(
+            len(family_registry),
+            p=np.asarray([registration.prior_weight for registration in family_registry]),
+        )
+    )
+    registration = family_registry[family_index]
+    family_adapter = registration.adapter
+    family_name = family_adapter.name
+    if task not in family_adapter.supported_tasks:
+        raise ValueError(f"adapter {family_name!r} does not support task {task!r}")
+    supported_representations = tuple(
+        family
+        for family in REPRESENTATION_FAMILIES
+        if family in family_adapter.supported_representations
+    )
+    if not supported_representations:
+        raise ValueError(f"adapter {family_name!r} does not support any known representation")
+    if representation == "mixed":
+        representation_family = str(rng.choice(supported_representations))
+        representation_family_probability = 1.0 / len(supported_representations)
+    elif representation in supported_representations:
         representation_family = representation
         representation_family_probability = 1.0
     else:
-        representation_family = "identity"
-        representation_family_probability = 1.0
+        raise ValueError(
+            f"adapter {family_name!r} does not support representation {representation!r}"
+        )
     projection_values = (
         [n_features]
         if representation_family == "identity"
@@ -215,15 +221,6 @@ def prepare_model(
     projection = make_representation(representation_family, projection_draw.value, seed)
     sampled_projection_parameters = projection.sample_parameters(seed)
     transformed = projection.fit_transform(X)
-
-    if selected_model_family == "gaussian":
-        covariance_draw = gaussian_covariance_prior.draw(n_features, rng)
-        covariance_structure = covariance_draw.value
-        covariance_probability = covariance_draw.probability
-    else:
-        covariance_draw = None
-        covariance_structure = None
-        covariance_probability = 1.0
 
     n_splits = n_splits_for_cv(cv)
     feasible_sizes = feasible_subset_sizes(y, task, min_subset_size, max_subset_size, n_splits)
@@ -237,158 +234,103 @@ def prepare_model(
     cv_splitter = make_cv_splitter(task, cv, int(rng.integers(0, 2**32 - 1)))
     splits = list(cv_splitter.split(X_subset, y_subset))
     n_train_min = min(len(train_indices) for train_indices, _ in splits)
-    k_max = n_train_min if max_neighbors is None else min(max_neighbors, n_train_min)
-    if k_max < 1:
-        raise ValueError("max_neighbors leaves no valid neighbourhood size")
-    if selected_model_family == "knn":
-        neighbor_draw = scale_prior.draw(range(1, k_max + 1), rng)
-        neighborhood_size = neighbor_draw.value
-    else:
-        neighbor_draw = None
-        neighborhood_size = None
+    context = SamplingContext(
+        task=task,
+        n_features=int(transformed.shape[1]),
+        n_classes=None if classes is None else len(classes),
+        n_samples=len(y_subset),
+        subset_size=int(subset_draw.value),
+        min_train_size=n_train_min,
+        classes=classes,
+        scale_prior=scale_prior,
+    )
+    parameter_prior = family_adapter.sample_parameters(context, rng)
+    if not np.isfinite(parameter_prior.log_probability):
+        raise ValueError(f"adapter {family_name!r} returned a non-finite parameter prior")
 
     return PreparedModel(
         task=task,
-        model_family=selected_model_family,
-        model_family_probability=model_family_probability,
+        family_name=family_name,
+        family_adapter=family_adapter,
+        family_prior_probability=registration.prior_weight,
+        parameters=dict(parameter_prior.parameters),
+        parameter_prior=parameter_prior,
         representation_family=representation_family,
         projection_dimension=projection_draw.value,
         projection_parameters={**sampled_projection_parameters, **projection.parameters()},
         representation_object=projection,
         representation_family_probability=representation_family_probability,
-        gaussian_covariance_structure=covariance_structure,
-        gaussian_covariance_probability=covariance_probability,
-        gaussian_covariance_draw=covariance_draw,
         subset_size=subset_draw.value,
         subset_indices=subset.indices,
         subset_log_probability=subset.log_probability,
-        neighborhood_size=neighborhood_size,
         projection_scale_draw=projection_draw,
         subset_scale_draw=subset_draw,
-        neighbor_scale_draw=neighbor_draw,
         X_subset=X_subset,
         y_subset=y_subset,
         splits=splits,
-        weights=weights,
-        metric=metric,
         alpha=alpha,
         epsilon=epsilon,
         classes=classes,
+        seed=seed,
     )
 
 
 def score_prepared_model(prepared: PreparedModel) -> float:
     """Score one prepared model; this phase is independently parallelizable."""
 
-    if prepared.model_family == "knn" and prepared.task == "classification":
+    if prepared.task == "classification":
         return classification_cv_score(
             prepared.X_subset,
             prepared.y_subset,
             prepared.splits,
-            prepared.neighborhood_size,
-            prepared.weights,
-            prepared.metric,
+            prepared.family_adapter,
+            prepared.parameters,
             prepared.alpha,
             prepared.classes,
+            prepared.seed,
         )
-    if prepared.model_family == "knn":
-        return regression_cv_score(
-            prepared.X_subset,
-            prepared.y_subset,
-            prepared.splits,
-            prepared.neighborhood_size,
-            prepared.weights,
-            prepared.metric,
-            prepared.epsilon,
-        )
-
-    scores: list[float] = []
-    class_positions = (
-        {label: index for index, label in enumerate(prepared.classes)}
-        if prepared.task == "classification"
-        else None
+    return regression_cv_score(
+        prepared.X_subset,
+        prepared.y_subset,
+        prepared.splits,
+        prepared.family_adapter,
+        prepared.parameters,
+        prepared.epsilon,
+        prepared.seed,
     )
-    for train_indices, validation_indices in prepared.splits:
-        estimator = make_model_estimator(
-            prepared.task,
-            prepared.model_family,
-            None,
-            prepared.weights,
-            prepared.metric,
-            prepared.gaussian_covariance_structure,
-        )
-        estimator.fit(prepared.X_subset[train_indices], prepared.y_subset[train_indices])
-        if prepared.task == "classification":
-            probabilities = estimator.predict_proba(prepared.X_subset[validation_indices])
-            aligned = np.zeros(
-                (len(probabilities), len(prepared.classes)),
-                dtype=float,
-            )
-            for local_index, label in enumerate(estimator.classes_):
-                aligned[:, class_positions[label]] = probabilities[:, local_index]
-            smoothed = (aligned + prepared.alpha) / (
-                1.0 + len(prepared.classes) * prepared.alpha
-            )
-            target_positions = np.array(
-                [class_positions[label] for label in prepared.y_subset[validation_indices]]
-            )
-            scores.extend(
-                np.log(smoothed[np.arange(len(target_positions)), target_positions]).tolist()
-            )
-        else:
-            predictions = estimator.predict(prepared.X_subset[validation_indices])
-            sigma2 = max(float(np.var(prepared.y_subset[train_indices])), prepared.epsilon**2)
-            scores.extend(
-                (
-                    -0.5
-                    * (
-                        np.log(2.0 * np.pi * sigma2)
-                        + (prepared.y_subset[validation_indices] - predictions) ** 2 / sigma2
-                    )
-                ).tolist()
-            )
-    return float(np.mean(scores))
 
 
 def fit_prepared_model(prepared: PreparedModel, cv_score: float) -> ModelDraw:
     """Fit one final model after its CV score has been computed."""
 
-    estimator = make_model_estimator(
+    estimator = prepared.family_adapter.build_estimator(
         prepared.task,
-        prepared.model_family,
-        prepared.neighborhood_size,
-        prepared.weights,
-        prepared.metric,
-        prepared.gaussian_covariance_structure,
+        prepared.parameters,
+        prepared.seed,
     )
     estimator.fit(prepared.X_subset, prepared.y_subset)
     log_prior = (
-        np.log(prepared.model_family_probability)
+        np.log(prepared.family_prior_probability)
         + np.log(prepared.representation_family_probability)
-        + np.log(prepared.gaussian_covariance_probability)
         + prepared.projection_scale_draw.log_probability
         + prepared.subset_scale_draw.log_probability
         + prepared.subset_log_probability
+        + prepared.parameter_prior.log_probability
     )
-    if prepared.neighbor_scale_draw is not None:
-        log_prior += prepared.neighbor_scale_draw.log_probability
     return ModelDraw(
-        model_family=prepared.model_family,
+        family_name=prepared.family_name,
+        family_prior_probability=prepared.family_prior_probability,
+        parameters=prepared.parameters,
+        parameter_prior=prepared.parameter_prior,
         representation_family=prepared.representation_family,
         projection_dimension=prepared.projection_dimension,
         projection_parameters=prepared.projection_parameters,
         representation_object=prepared.representation_object,
-        model_family_probability=prepared.model_family_probability,
         representation_family_probability=prepared.representation_family_probability,
-        gaussian_covariance_structure=prepared.gaussian_covariance_structure,
-        gaussian_covariance_probability=prepared.gaussian_covariance_probability,
-        gaussian_covariance_draw=prepared.gaussian_covariance_draw,
         subset_size=prepared.subset_size,
         subset_indices=prepared.subset_indices,
-        neighborhood_size=prepared.neighborhood_size,
         projection_scale_draw=prepared.projection_scale_draw,
         subset_scale_draw=prepared.subset_scale_draw,
-        neighbor_scale_draw=prepared.neighbor_scale_draw,
         log_prior=float(log_prior),
         log_proposal=float(log_prior),
         cv_log_pseudo_likelihood=float(cv_score),
