@@ -5,6 +5,13 @@ from .classification_2d import (
     make_2d_dataset,
     run_2d_classification_experiment,
 )
+from .classifier_comparison import (
+    DatasetComparisonResult,
+    format_comparison_table,
+    load_standard_dataset,
+    run_comparison_suite,
+    run_dataset_comparison,
+)
 from .two_moons import (
     TwoMoonsResult,
     format_convergence_history,
@@ -14,10 +21,15 @@ from .two_moons import (
 
 __all__ = [
     "Classification2DResult",
+    "DatasetComparisonResult",
     "TwoMoonsResult",
+    "format_comparison_table",
     "format_convergence_history",
+    "load_standard_dataset",
     "make_2d_dataset",
     "plot_probability_heatmap",
+    "run_comparison_suite",
+    "run_dataset_comparison",
     "run_two_moons_experiment",
     "run_2d_classification_experiment",
 ]
