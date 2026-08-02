@@ -81,7 +81,11 @@ class BayesianKNNBase(BaseEstimator):
             or int(self.n_estimators) < 1
         ):
             raise ValueError("n_estimators must be a positive integer or 'auto'")
-        if isinstance(self.max_estimators, bool) or int(self.max_estimators) < 1:
+        if (
+            isinstance(self.max_estimators, bool)
+            or not isinstance(self.max_estimators, (int, np.integer))
+            or int(self.max_estimators) < 1
+        ):
             raise ValueError("max_estimators must be a positive integer")
         if not np.isfinite(self.tolerance) or self.tolerance <= 0:
             raise ValueError("tolerance must be finite and positive")
@@ -93,12 +97,17 @@ class BayesianKNNBase(BaseEstimator):
             raise ValueError("alpha must be finite and positive")
         if not np.isfinite(self.epsilon) or self.epsilon <= 0:
             raise ValueError("epsilon must be finite and positive")
-        if self.min_subset_size is not None and int(self.min_subset_size) < 1:
-            raise ValueError("min_subset_size must be positive")
-        if self.max_subset_size is not None and int(self.max_subset_size) < 1:
-            raise ValueError("max_subset_size must be positive")
-        if self.max_neighbors is not None and int(self.max_neighbors) < 1:
-            raise ValueError("max_neighbors must be positive")
+        for name, value in (
+            ("min_subset_size", self.min_subset_size),
+            ("max_subset_size", self.max_subset_size),
+            ("max_neighbors", self.max_neighbors),
+        ):
+            if value is not None and (
+                isinstance(value, bool)
+                or not isinstance(value, (int, np.integer))
+                or int(value) < 1
+            ):
+                raise ValueError(f"{name} must be a positive integer")
 
     def _fit_task(self, X: Any, y: Any, task: str) -> BayesianKNNBase:
         self._validate_parameters()

@@ -7,7 +7,6 @@ from typing import TypeVar
 
 from joblib import Parallel, delayed
 
-
 Item = TypeVar("Item")
 Result = TypeVar("Result")
 
