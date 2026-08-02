@@ -22,6 +22,16 @@ class ScalePriorDraw:
     probabilities: tuple[float, ...]
 
 
+@dataclass(frozen=True)
+class GaussianCovarianceDraw:
+    """One draw from the Gaussian covariance-complexity prior."""
+
+    value: str
+    probability: float
+    log_probability: float
+    probabilities: tuple[float, ...]
+
+
 class LogisticScalePrior:
     """Monotone logistic prior for an ordered collection of integer values."""
 
@@ -75,6 +85,60 @@ class LogisticScalePrior:
             log_probability=float(np.log(probability)),
             probabilities=tuple(float(probability_) for probability_ in probabilities),
         )
+
+
+class GaussianCovariancePrior:
+    """Simplicity prior over isotropic, diagonal, and full covariance."""
+
+    structures = ("isotropic", "diagonal", "full")
+
+    def __init__(self, simplicity: float = 1.0) -> None:
+        if not np.isfinite(simplicity) or simplicity <= 0:
+            raise ValueError("simplicity must be finite and positive")
+        self.simplicity = float(simplicity)
+
+    def get_params(self, deep: bool = True) -> dict[str, float]:
+        return {"simplicity": self.simplicity}
+
+    def draw(self, n_features: int, rng: np.random.Generator) -> GaussianCovarianceDraw:
+        if isinstance(n_features, (bool, np.bool_)) or not isinstance(
+            n_features, (int, np.integer)
+        ) or n_features < 1:
+            raise ValueError("n_features must be a positive integer")
+        parameter_counts = np.array(
+            [1, n_features, n_features * (n_features + 1) // 2], dtype=float
+        )
+        log_weights = -self.simplicity * np.log1p(parameter_counts)
+        log_probabilities = log_weights - logsumexp(log_weights)
+        probabilities = np.exp(log_probabilities)
+        index = int(rng.choice(len(self.structures), p=probabilities))
+        probability = float(probabilities[index])
+        return GaussianCovarianceDraw(
+            value=self.structures[index],
+            probability=probability,
+            log_probability=float(np.log(probability)),
+            probabilities=tuple(float(value) for value in probabilities),
+        )
+
+
+def make_gaussian_covariance_prior(
+    configuration: object | None,
+) -> GaussianCovariancePrior:
+    """Normalize a Gaussian covariance-prior object or configuration."""
+
+    if configuration is None:
+        return GaussianCovariancePrior()
+    if isinstance(configuration, GaussianCovariancePrior):
+        return configuration
+    if isinstance(configuration, Mapping):
+        values = dict(configuration)
+        family = values.pop("family", values.pop("name", "simplicity"))
+        if family not in {"simplicity", "gaussian_covariance"}:
+            raise ValueError("only the Gaussian covariance simplicity prior is implemented")
+        return GaussianCovariancePrior(**values)
+    if callable(getattr(configuration, "draw", None)):
+        return configuration  # type: ignore[return-value]
+    raise TypeError("gaussian_covariance_prior must be a prior object or mapping")
 
 
 def make_scale_prior(configuration: object | None) -> LogisticScalePrior:
