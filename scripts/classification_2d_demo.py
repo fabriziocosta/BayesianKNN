@@ -34,12 +34,12 @@ def run_and_report(
         print(f"test accuracy: {result.test_accuracy:.3f}")
         print(f"estimators used: {result.model.n_estimators_}")
         print(f"converged: {result.model.converged_}")
+        print(format_family_draw_frequencies(result))
         family_shares = ", ".join(
             f"{name}={share:.3f}"
             for name, share in result.model_masses["family"].items()
         )
         print(f"family posterior shares: {family_shares}")
-        print(format_family_draw_frequencies(result))
         print(
             format_family_parameter_shares(
                 result,
