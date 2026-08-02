@@ -2,13 +2,33 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Mapping
 from typing import Any
 
 import numpy as np
+from sklearn.exceptions import ConvergenceWarning
 
 from .adapters import EstimatorFamilyAdapter
 from .utils import child_seed
+
+
+def fit_adapter_estimator(
+    adapter: EstimatorFamilyAdapter,
+    estimator: Any,
+    X: Any,
+    y: np.ndarray,
+) -> None:
+    """Fit an adapter estimator while suppressing expected MLP convergence noise."""
+
+    with warnings.catch_warnings():
+        if adapter.name == "mlp":
+            warnings.filterwarnings(
+                "ignore",
+                message="Stochastic Optimizer: Maximum iterations.*",
+                category=ConvergenceWarning,
+            )
+        estimator.fit(X, y)
 
 
 def _aligned_probabilities(
@@ -52,7 +72,12 @@ def classification_cv_score(
         estimator = adapter.build_estimator(
             "classification", parameters, child_seed(seed, fold_index)
         )
-        estimator.fit(X[train_indices], y[train_indices])
+        fit_adapter_estimator(
+            adapter,
+            estimator,
+            X[train_indices],
+            y[train_indices],
+        )
         if not callable(getattr(estimator, "predict_proba", None)):
             raise TypeError(
                 f"classification adapter {adapter.name!r} must build an estimator with "
@@ -87,7 +112,12 @@ def regression_cv_score(
     log_likelihoods: list[float] = []
     for fold_index, (train_indices, validation_indices) in enumerate(splits):
         estimator = adapter.build_estimator("regression", parameters, child_seed(seed, fold_index))
-        estimator.fit(X[train_indices], y[train_indices])
+        fit_adapter_estimator(
+            adapter,
+            estimator,
+            X[train_indices],
+            y[train_indices],
+        )
         predictions = np.asarray(estimator.predict(X[validation_indices]), dtype=float)
         sigma2 = max(float(np.var(y[train_indices])), epsilon**2)
         log_likelihoods.extend(

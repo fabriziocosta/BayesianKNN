@@ -19,7 +19,7 @@ from .adapters import (
 from .models import ModelDraw
 from .priors import LogisticScalePrior, ParameterDraw
 from .representation import make_representation
-from .scoring import classification_cv_score, regression_cv_score
+from .scoring import classification_cv_score, fit_adapter_estimator, regression_cv_score
 
 REPRESENTATION_FAMILIES = ("gaussian", "sparse", "identity")
 
@@ -308,7 +308,12 @@ def fit_prepared_model(prepared: PreparedModel, cv_score: float) -> ModelDraw:
         prepared.parameters,
         prepared.seed,
     )
-    estimator.fit(prepared.X_subset, prepared.y_subset)
+    fit_adapter_estimator(
+        prepared.family_adapter,
+        estimator,
+        prepared.X_subset,
+        prepared.y_subset,
+    )
     log_prior = (
         np.log(prepared.family_prior_probability)
         + np.log(prepared.representation_family_probability)
