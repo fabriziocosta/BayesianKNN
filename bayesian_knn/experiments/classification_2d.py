@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from sklearn.datasets import load_iris, make_moons
+from sklearn.datasets import load_iris, make_blobs, make_moons
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 
@@ -36,6 +36,9 @@ DATASET_ALIASES = {
     "2 equal isotropic gaussians": "gaussian",
     "2_equal_isotropic_gaussians": "gaussian",
     "two_equal_isotropic_gaussians": "gaussian",
+    "blob": "blobs",
+    "blobs": "blobs",
+    "gaussian_blobs": "blobs",
 }
 
 
@@ -69,7 +72,7 @@ def _canonical_dataset(dataset: str) -> str:
     try:
         return DATASET_ALIASES[dataset.lower()]
     except (AttributeError, KeyError) as error:
-        choices = ", ".join(sorted({"moon", "iris", "gaussian"}))
+        choices = ", ".join(sorted({"moon", "iris", "gaussian", "blobs"}))
         raise ValueError(f"dataset must be one of: {choices}") from error
 
 
@@ -98,6 +101,29 @@ def _make_equal_isotropic_gaussians(
     return X[order], y[order]
 
 
+def _make_blobs(
+    n_samples: int,
+    n_classes: int,
+    standard_deviation: float,
+    random_state: int | None,
+) -> tuple[np.ndarray, np.ndarray]:
+    if not isinstance(n_classes, (int, np.integer)) or isinstance(n_classes, bool):
+        raise ValueError("n_classes must be an integer")
+    if n_classes < 2:
+        raise ValueError("n_classes must be at least 2")
+    if n_samples < n_classes:
+        raise ValueError("n_samples must be at least n_classes")
+    if standard_deviation <= 0:
+        raise ValueError("standard_deviation must be positive")
+    return make_blobs(
+        n_samples=n_samples,
+        centers=int(n_classes),
+        n_features=2,
+        cluster_std=standard_deviation,
+        random_state=random_state,
+    )
+
+
 def make_2d_dataset(
     dataset: str = "moon",
     *,
@@ -107,8 +133,12 @@ def make_2d_dataset(
     feature_indices: tuple[int, int] = (0, 1),
     mean_distance: float = 3.0,
     standard_deviation: float = 1.0,
+    n_classes: int = 3,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Create one of the supported two-dimensional classification datasets."""
+    """Create one of the supported two-dimensional classification datasets.
+
+    ``n_classes`` controls the number of classes for the ``"blobs"`` dataset.
+    """
 
     name = _canonical_dataset(dataset)
     if name == "moon":
@@ -120,6 +150,13 @@ def make_2d_dataset(
         if min(feature_indices) < 0 or max(feature_indices) >= iris.data.shape[1]:
             raise ValueError("Iris feature_indices must be between 0 and 3")
         return iris.data[:, feature_indices], iris.target
+    if name == "blobs":
+        return _make_blobs(
+            n_samples=n_samples,
+            n_classes=n_classes,
+            standard_deviation=standard_deviation,
+            random_state=random_state,
+        )
     return _make_equal_isotropic_gaussians(
         n_samples=n_samples,
         mean_distance=mean_distance,
@@ -145,6 +182,7 @@ def run_2d_classification_experiment(
         "feature_indices": (0, 1),
         "mean_distance": 3.0,
         "standard_deviation": 1.0,
+        "n_classes": 3,
     }
     if dataset_parameters is not None:
         parameters.update(dataset_parameters)

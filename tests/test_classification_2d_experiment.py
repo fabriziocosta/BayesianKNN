@@ -24,13 +24,16 @@ def test_supported_2d_dataset_shapes_and_labels():
     moon_X, moon_y = make_2d_dataset("moon", n_samples=80)
     iris_X, iris_y = make_2d_dataset("iris")
     gaussian_X, gaussian_y = make_2d_dataset("gaussian", n_samples=80)
+    blobs_X, blobs_y = make_2d_dataset("blobs", n_samples=90, n_classes=4)
 
     assert moon_X.shape == (80, 2)
     assert iris_X.shape == (150, 2)
     assert gaussian_X.shape == (80, 2)
+    assert blobs_X.shape == (90, 2)
     assert np.array_equal(np.unique(moon_y), [0, 1])
     assert np.array_equal(np.unique(iris_y), [0, 1, 2])
     assert np.array_equal(np.unique(gaussian_y), [0, 1])
+    assert np.array_equal(np.unique(blobs_y), [0, 1, 2, 3])
 
 
 def test_each_supported_dataset_can_run_through_the_generic_experiment():
@@ -38,6 +41,7 @@ def test_each_supported_dataset_can_run_through_the_generic_experiment():
         ("moon", {"n_samples": 80}),
         ("iris", {"feature_indices": (2, 3)}),
         ("gaussian", {"n_samples": 80}),
+        ("blobs", {"n_samples": 80, "n_classes": 4}),
     ):
         result = run_2d_classification_experiment(
             dataset,
@@ -50,6 +54,11 @@ def test_each_supported_dataset_can_run_through_the_generic_experiment():
         assert result.y_pred.shape == result.y_test.shape
         assert 0.0 <= result.test_accuracy <= 1.0
         assert result.probability_class in result.model.classes_
+
+
+def test_blobs_validate_number_of_classes():
+    with pytest.raises(ValueError, match="n_classes"):
+        make_2d_dataset("blobs", n_samples=20, n_classes=1)
 
 
 def test_multiclass_plot_creates_one_probability_panel_per_class():
