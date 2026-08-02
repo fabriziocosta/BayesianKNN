@@ -104,7 +104,8 @@ def _make_equal_isotropic_gaussians(
 def _make_blobs(
     n_samples: int,
     n_classes: int,
-    standard_deviation: float,
+    center_radius: float,
+    cluster_standard_deviation: float,
     random_state: int | None,
 ) -> tuple[np.ndarray, np.ndarray]:
     if not isinstance(n_classes, (int, np.integer)) or isinstance(n_classes, bool):
@@ -113,13 +114,17 @@ def _make_blobs(
         raise ValueError("n_classes must be at least 2")
     if n_samples < n_classes:
         raise ValueError("n_samples must be at least n_classes")
-    if standard_deviation <= 0:
-        raise ValueError("standard_deviation must be positive")
+    if center_radius <= 0:
+        raise ValueError("center_radius must be positive")
+    if cluster_standard_deviation <= 0:
+        raise ValueError("cluster_standard_deviation must be positive")
+    angles = np.linspace(0.0, 2.0 * np.pi, int(n_classes), endpoint=False)
+    centers = center_radius * np.column_stack((np.cos(angles), np.sin(angles)))
     return make_blobs(
         n_samples=n_samples,
-        centers=int(n_classes),
+        centers=centers,
         n_features=2,
-        cluster_std=standard_deviation,
+        cluster_std=cluster_standard_deviation,
         random_state=random_state,
     )
 
@@ -134,10 +139,14 @@ def make_2d_dataset(
     mean_distance: float = 3.0,
     standard_deviation: float = 1.0,
     n_classes: int = 3,
+    blob_center_radius: float = 3.0,
+    blob_cluster_standard_deviation: float = 1.5,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Create one of the supported two-dimensional classification datasets.
 
     ``n_classes`` controls the number of classes for the ``"blobs"`` dataset.
+    Blob centers are placed evenly on a circle so their separation is
+    controlled by ``blob_center_radius`` rather than by a random center box.
     """
 
     name = _canonical_dataset(dataset)
@@ -154,7 +163,8 @@ def make_2d_dataset(
         return _make_blobs(
             n_samples=n_samples,
             n_classes=n_classes,
-            standard_deviation=standard_deviation,
+            center_radius=blob_center_radius,
+            cluster_standard_deviation=blob_cluster_standard_deviation,
             random_state=random_state,
         )
     return _make_equal_isotropic_gaussians(
@@ -183,6 +193,8 @@ def run_2d_classification_experiment(
         "mean_distance": 3.0,
         "standard_deviation": 1.0,
         "n_classes": 3,
+        "blob_center_radius": 3.0,
+        "blob_cluster_standard_deviation": 1.5,
     }
     if dataset_parameters is not None:
         parameters.update(dataset_parameters)

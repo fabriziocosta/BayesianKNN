@@ -61,6 +61,25 @@ def test_blobs_validate_number_of_classes():
         make_2d_dataset("blobs", n_samples=20, n_classes=1)
 
 
+def test_blobs_expose_center_and_spread_controls():
+    X, y = make_2d_dataset(
+        "blobs",
+        n_samples=900,
+        n_classes=3,
+        blob_center_radius=2.5,
+        blob_cluster_standard_deviation=1.8,
+        random_state=4,
+    )
+    class_means = np.array([X[y == label].mean(axis=0) for label in np.unique(y)])
+    assert np.allclose(np.linalg.norm(class_means, axis=1), 2.5, atol=0.25)
+    assert np.max(np.linalg.norm(X - class_means[y], axis=1)) > 4.0
+
+    with pytest.raises(ValueError, match="center_radius"):
+        make_2d_dataset("blobs", n_classes=3, blob_center_radius=0)
+    with pytest.raises(ValueError, match="cluster_standard_deviation"):
+        make_2d_dataset("blobs", n_classes=3, blob_cluster_standard_deviation=0)
+
+
 def test_multiclass_plot_creates_one_probability_panel_per_class():
     pytest.importorskip("matplotlib")
     result = run_2d_classification_experiment(
