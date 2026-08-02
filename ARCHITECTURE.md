@@ -538,10 +538,10 @@ cv=5
 
 `cv` must be an integer at least 2 or a scikit-learn splitter. For an integer, construct `StratifiedKFold` for classification and `KFold` for regression, using the estimator's deterministic seed. For a supplied splitter, clone it and validate it for every sampled subset. Classification requires at least `n_splits` samples of every global class in an admissible subset. Regression requires at least `n_splits` observations. The selected `k` is bounded by the smallest training-fold size.
 
-For classification, expand every fold's probability vector to the estimator's global `classes_` ordering before averaging. If `p` is the k-neighbour class frequency vector and `C` is the number of global classes, Dirichlet smoothing uses a documented positive `alpha` parameter:
+For classification, expand every fold's probability vector to the estimator's global `classes_` ordering before averaging. If `p` is the classifier probability vector and `C` is the number of global classes, Dirichlet smoothing uses a documented positive `alpha` parameter and unit predictive concentration for the built-in classifier families:
 
 $$
-p_{\mathrm{smooth},j}=\frac{k p_j+\alpha}{k+C\alpha}.
+p_{\mathrm{smooth},j}=\frac{p_j+\alpha}{1+C\alpha}.
 $$
 
 Apply this to all global classes, including classes absent from an individual fold.
@@ -559,10 +559,11 @@ $$
 
 Average over every validation observation. This is a cross-validated scoring utility, not a literal Bayesian likelihood.
 
-Non-k-NN classification draws use the same global class alignment and
-Dirichlet smoothing with unit predictive concentration, namely
-`(p + alpha) / (1 + C * alpha)`, because linear and Gaussian classifiers do
-not have a neighbourhood count.
+The k-NN neighbourhood size affects its probability vector, but is not used a
+second time as a confidence multiplier. This keeps cross-validated
+pseudo-likelihoods comparable across k-NN, linear, Gaussian, and MLP families.
+Custom adapters may provide a different predictive concentration only when
+that calibration is intentional and comparable across registered families.
 
 For regression, define a Gaussian pseudo-likelihood from validation residuals:
 

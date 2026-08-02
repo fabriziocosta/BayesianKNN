@@ -67,6 +67,14 @@ def test_classifier_predicts_and_stores_complete_draws(data):
     )
 
 
+def test_builtin_classifier_concentrations_are_comparable():
+    parameters = {"n_neighbors": 8}
+    assert KNNAdapter().predictive_concentration("classification", parameters) == 1.0
+    assert LinearAdapter().predictive_concentration("classification", {}) == 1.0
+    assert GaussianAdapter().predictive_concentration("classification", {}) == 1.0
+    assert MLPAdapter().predictive_concentration("classification", {}) == 1.0
+
+
 def test_regressor_predicts_and_scores(data):
     X, _, y = data
     estimator = BayesianModelAveragingRegressor(**estimator_kwargs()).fit(X, y)

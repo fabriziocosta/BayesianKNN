@@ -163,7 +163,10 @@ class KNNAdapter(BaseEstimator):
         task: str,
         parameters: Mapping[str, Any],
     ) -> float:
-        return float(parameters["n_neighbors"]) if task == "classification" else 1.0
+        # The neighbourhood size already determines the k-NN probability
+        # vector. Do not use it a second time as cross-family confidence;
+        # that would make k-NN scores incomparable with other classifiers.
+        return 1.0
 
 
 class LinearAdapter(BaseEstimator):
