@@ -20,7 +20,7 @@ Available estimators:
 - `BayesianKNNClassifier`, including `predict_proba()`
 - `BayesianKNNRegressor`
 
-The full design and implementation specification is in [specs.md](specs.md).
+The full design and implementation documentation is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 For development:
 
