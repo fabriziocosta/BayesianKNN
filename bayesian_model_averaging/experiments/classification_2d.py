@@ -524,9 +524,13 @@ def plot_probability_heatmap(
     padding: float = 0.55,
     grid_size: int = 350,
     class_label: Any | None = None,
+    dotted_threshold: float = 0.25,
     output_path: str | Path | None = None,
 ) -> Any:
-    """Plot probability surfaces, one panel per class for multiclass data."""
+    """Plot probability surfaces with configurable dotted contours."""
+
+    if not np.isfinite(dotted_threshold) or not 0 < dotted_threshold < 0.5:
+        raise ValueError("dotted_threshold must be finite and strictly between 0 and 0.5")
 
     import matplotlib.pyplot as plt
 
@@ -561,7 +565,7 @@ def plot_probability_heatmap(
             xx,
             yy,
             probability,
-            levels=[0.25, 0.75],
+            levels=[dotted_threshold, 1.0 - dotted_threshold],
             linewidths=1.4,
             linestyles=":",
             colors="black",
