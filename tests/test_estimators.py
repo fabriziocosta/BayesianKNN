@@ -193,12 +193,22 @@ def test_mlp_adapter_samples_structured_parameters(data):
     assert all(np.isfinite(draw["parameter_prior"]["log_probability"]) for draw in draws)
 
 
+def test_mlp_adapter_supports_regression(data):
+    X, _, y = data
+    estimator = BayesianModelAveragingRegressor(
+        **{**estimator_kwargs(MLPAdapter()), "n_estimators": 1}
+    ).fit(X, y)
+    assert estimator.predict(X[:3]).shape == (3,)
+
+
 class ToyClassifierAdapter(BaseEstimator):
     name = "toy"
     supported_tasks = frozenset({"classification"})
     supported_representations = frozenset({"identity"})
 
-    def sample_parameters(self, context: SamplingContext, rng: np.random.Generator) -> ParameterDraw:
+    def sample_parameters(
+        self, context: SamplingContext, rng: np.random.Generator
+    ) -> ParameterDraw:
         depth = int(rng.choice([1, 2]))
         return ParameterDraw(
             parameters={"max_depth": depth},
@@ -218,7 +228,9 @@ class ToyRegressorAdapter(BaseEstimator):
     supported_tasks = frozenset({"regression"})
     supported_representations = frozenset({"identity"})
 
-    def sample_parameters(self, context: SamplingContext, rng: np.random.Generator) -> ParameterDraw:
+    def sample_parameters(
+        self, context: SamplingContext, rng: np.random.Generator
+    ) -> ParameterDraw:
         return ParameterDraw(parameters={"alpha": 1.0}, log_probability=0.0, metadata={})
 
     def build_estimator(self, task, parameters, random_state):
@@ -248,7 +260,7 @@ def test_custom_regressor_adapter_registers_without_core_changes(data):
 
 def test_adapter_validation_rejects_wrong_task(data):
     X, y, _ = data
-    with pytest.raises(ValueError, match="do not support task"):
+    with pytest.raises(ValueError, match="no registered adapter supports task"):
         BayesianModelAveragingRegressor(
             **{**estimator_kwargs(ToyClassifierAdapter()), "n_estimators": 1}
         ).fit(X, y)
@@ -299,9 +311,14 @@ def test_estimator_is_cloneable_and_works_in_grid_search(data):
     X, y, _ = data
     estimator = BayesianModelAveragingClassifier(**estimator_kwargs())
     cloned = clone(estimator)
-    assert cloned.get_params()["family_registry"] == estimator.get_params()["family_registry"]
+    assert cloned.get_params()["family_registry"][0].adapter.name == "knn"
     search = GridSearchCV(
-        make_pipeline(StandardScaler(), estimator),
+        make_pipeline(
+            StandardScaler(),
+            BayesianModelAveragingClassifier(
+                **{**estimator_kwargs(), "max_subset_size": 12}
+            ),
+        ),
         {
             "bayesianmodelaveragingclassifier__family_registry": [
                 registration(KNNAdapter(max_neighbors=1)),

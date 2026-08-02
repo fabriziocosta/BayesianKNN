@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "bayesian-model-averaging"
 version = "0.1.0"
-description = "Bayesian model averaging for k-nearest-neighbours, linear, and Gaussian predictors"
+description = "Bayesian model averaging with pluggable scikit-learn estimator-family adapters"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }

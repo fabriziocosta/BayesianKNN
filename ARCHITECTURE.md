@@ -22,12 +22,12 @@ are explicitly represented:
 
 Rather than fixing any of these quantities, they are treated as latent random variables and sampled from common probabilistic priors. A single reusable scale-prior mechanism governs all ordered scale variables, ensuring that the implementation remains conceptually simple and internally consistent.
 
-The estimator can also integrate across predictive model families. In
-`model_family="mixed"`, k-NN, linear, and Gaussian models are sampled from a
-uniform family prior and averaged using the same cross-validated
-pseudo-posterior weights. Gaussian classification draws additionally integrate
-over isotropic, diagonal, and full covariance structures under a simplicity
-prior.
+The estimator integrates across predictive model families through a runtime
+adapter registry. The default registry contains k-NN, linear, Gaussian, and
+MLP adapters. Each registration has an explicit family prior weight, and each
+adapter owns the prior over its complete estimator-parameter configuration.
+All registered models are averaged using the same cross-validated
+pseudo-posterior weights.
 
 Each sampled model is evaluated using a cross-validated predictive pseudo-likelihood. These predictive scores determine the contribution of each model to the final Bayesian model average. Consequently, models that make better predictions naturally receive greater influence, while models that are less predictive contribute proportionally less.
 
@@ -100,27 +100,24 @@ The prediction module knows nothing about random projections. It receives
 transformed data only and supports classification and regression estimators
 selected by the sampled model family.
 
-### 3. Model-family module
+### 3. Estimator-family adapters
 
-The estimator parameter `model_family` accepts:
+The estimator accepts a runtime `family_registry` containing
+`FamilyRegistration(adapter, prior_weight)` entries. A registry with one entry
+selects one family; multiple entries define a family mixture. The core samples
+the registered family using normalized prior weights and does not contain
+family-name conditionals.
 
-- `"knn"`: weighted k-NN, with the sampled neighbourhood size and
-  representation machinery;
-- `"linear"`: `LogisticRegression` for classification and `Ridge` for
-  regression;
-- `"gaussian"`: a generative Gaussian classifier or `BayesianRidge` for
-  regression;
-- `"mixed"`: a uniform prior over the three families.
+Every adapter declares its supported tasks and representations, samples a
+complete valid parameter configuration, constructs a scikit-learn estimator,
+and declares any predictive concentration used by the generic scorer. A new
+family can therefore be added without changing the Bayesian integration engine.
 
-The default is `"mixed"`, so the renamed estimator averages all three families
-without requiring special configuration. Linear and Gaussian draws use the
-identity representation and do not sample k. Their family probability and any
-applicable covariance probability are retained in the model record and in
-`log_prior`.
-
-For Gaussian classification, covariance structure is itself a discrete latent
-variable sampled for every Gaussian draw, just as k is sampled for every k-NN
-draw. The structures are ordered by complexity:
+The built-in adapters are k-NN, linear, Gaussian, and MLP. The MLP adapter
+uses structured priors over architecture, activation, regularization, and
+learning rate. Gaussian covariance structure is sampled by its adapter as a
+discrete parameter of the complete family draw. The structures are ordered by
+complexity:
 
 $$
 q_{\mathrm{iso}}=1,\qquad
@@ -145,13 +142,11 @@ This module performs Monte Carlo sampling over complete models.
 
 Each Monte Carlo draw samples:
 
-- a model family when `model_family="mixed"`;
-- a representation family when `representation="mixed"`;
+- a registered model family using its normalized prior weight;
+- a representation family supported by the selected adapter;
 - representation parameters within the selected representation family;
-- subset size;
-- subset;
-- neighbourhood size for k-NN draws;
-- Gaussian covariance structure for Gaussian classification draws.
+- subset size and subset;
+- a complete adapter-owned estimator-parameter draw.
 
 It fits the corresponding model, computes its cross-validated pseudo-likelihood, and contributes to the Bayesian model average.
 
@@ -172,6 +167,7 @@ bayesian_model_averaging/
         identity.py
 
     priors.py
+    adapters.py
     model_families.py
     sampling.py
     scoring.py
@@ -189,10 +185,9 @@ Install the package and its runtime dependencies with:
 python -m pip install .
 ~~~
 
-The estimators use mixed model families, a mixed representation family,
-distance-weighted Euclidean k-NN components, five-fold cross-validation, and
-automatic Monte Carlo growth by default. Set `model_family="knn"` to use only
-the k-NN family.
+The estimators use the default weighted family registry, a mixed representation
+family where supported, five-fold cross-validation, and automatic Monte Carlo
+growth by default. Pass a one-entry `family_registry` to use only one family.
 For a small deterministic run:
 
 ~~~python
@@ -495,11 +490,11 @@ scale_prior=LogisticScalePrior(
 )
 ~~~
 
-The same prior object should be passed to:
+The same prior object should be made available to:
 
 - the representation sampler;
 - the subset sampler;
-- the neighbourhood sampler.
+- adapter-owned ordered-scale samplers such as the k-NN neighbourhood sampler.
 
 Do not duplicate the logistic sampling code anywhere else in the package.
 
@@ -519,15 +514,10 @@ without changing the representation, sampling, scoring, or prediction modules.
 
 One draw samples:
 
-1. model family when using the mixed mode;
-2. representation family for a k-NN draw when using the mixed mode;
-3. projection dimension within the selected representation family;
-4. projection matrix or identity transform;
-5. Gaussian covariance structure for a Gaussian classifier;
-6. subset logistic parameters;
-7. subset size;
-8. subset indices;
-9. neighbourhood logistic parameters and size for a k-NN draw.
+1. registered model family and its prior probability;
+2. representation family and projection parameters;
+3. subset logistic parameters, size, and indices;
+4. the complete adapter-owned estimator-parameter draw.
 
 The transformed subset is then fitted with the selected estimator. Every
 sampled parameter is retained.
@@ -805,18 +795,17 @@ n_jobs=1
 
 Each sampled model stores:
 
-- model family and model-family probability;
+- family name and family prior probability;
+- the generic sampled parameter mapping;
+- the complete parameter-prior draw and metadata;
 - representation family;
 - representation family probability;
 - projection dimension;
 - projection parameters;
 - subset size;
 - subset indices;
-- neighbourhood size;
 - beta and cutoff for projection dimension;
 - beta and cutoff for subset size;
-- beta and cutoff for neighbourhood size;
-- Gaussian covariance structure and its prior probability when applicable;
 - pseudo-log-likelihood;
 - posterior weight.
 
@@ -834,15 +823,9 @@ Also expose:
 get_model_masses()
 ~~~
 
-This aggregates the fitted model weights into diagnostics. The
-`model_family` mapping reports global mass for k-NN, linear, and Gaussian
-families and sums to one. Under `by_family.knn`, `neighborhood_size` reports
-the joint mass of each selected k and sums to the k-NN family mass. Under
-`by_family.gaussian`, `covariance_structure` reports the joint mass of
-isotropic, diagonal, and full covariance and sums to the Gaussian family mass.
-Each section also provides a conditional within-family mapping that sums to
-one whenever that family has positive mass. The same structure is available
-as the fitted `model_masses_` attribute.
+This aggregates the fitted model weights into a generic family-mass mapping
+that sums to one. Family-specific parameter details remain available in each
+model draw's `parameters` and `parameter_prior` payloads.
 
 The 2D experiment result exposes the same report as `result.model_masses` for
 plotting or tabular diagnostics.
@@ -873,7 +856,11 @@ get_model_draws()
 
 The regressor supports `fit()`, `predict()`, `score()`, and `get_model_draws()`. It does not expose `predict_proba()`, consistent with the scikit-learn estimator API.
 
-The estimator constructors must expose, validate, and preserve through cloning the parameters that affect these rules, including `cv`, `alpha`, `epsilon`, `temperature`, `max_neighbors`, `n_estimators`, `max_estimators`, `tolerance`, `convergence_metric`, `n_jobs`, and `random_state`.
+The estimator constructors must expose, validate, and preserve through cloning
+the runtime `family_registry`, `cv`, `alpha`, `epsilon`, `temperature`,
+`n_estimators`, `max_estimators`, `tolerance`, `convergence_metric`, `n_jobs`,
+and `random_state`. Family-specific settings such as `max_neighbors` belong to
+the corresponding adapter.
 
 The implementation must comply with the scikit-learn estimator API and support cloning, pipelines, and GridSearchCV. It must be organized so that new representation modules, priors, convergence criteria, or prediction engines can be added without changing the core Bayesian integration logic.
 

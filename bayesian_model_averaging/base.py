@@ -11,12 +11,12 @@ from sklearn.base import BaseEstimator
 from sklearn.utils import check_array, check_X_y
 from sklearn.utils.validation import check_is_fitted
 
-from .convergence import compare_predictions, convergence_difference
 from .adapters import (
     EstimatorFamilyAdapter,
     FamilyRegistration,
     normalize_family_registry,
 )
+from .convergence import compare_predictions, convergence_difference
 from .models import ModelDraw, aggregate_model_masses
 from .priors import LogisticScalePrior, make_scale_prior
 from .sampling import (
@@ -109,7 +109,10 @@ class BayesianModelAveragingBase(BaseEstimator):
             raise ValueError("epsilon must be finite and positive")
         if not np.isfinite(self.temperature) or self.temperature <= 0:
             raise ValueError("temperature must be finite and positive")
-        for name, value in (("min_subset_size", self.min_subset_size), ("max_subset_size", self.max_subset_size)):
+        for name, value in (
+            ("min_subset_size", self.min_subset_size),
+            ("max_subset_size", self.max_subset_size),
+        ):
             if value is not None and (
                 isinstance(value, bool)
                 or not isinstance(value, (int, np.integer))
@@ -143,16 +146,22 @@ class BayesianModelAveragingBase(BaseEstimator):
             raise ValueError("no admissible subset size exists for this dataset and CV setup")
 
         self.scale_prior_ = make_scale_prior(self.scale_prior)
-        self.family_registry_ = normalize_family_registry(self.family_registry)
-        unsupported = [
-            registration.adapter.name
-            for registration in self.family_registry_
-            if task not in registration.adapter.supported_tasks
-        ]
-        if unsupported:
-            raise ValueError(
-                f"registered adapters do not support task {task!r}: {', '.join(unsupported)}"
+        registry = normalize_family_registry(self.family_registry)
+        compatible = tuple(
+            registration
+            for registration in registry
+            if task in registration.adapter.supported_tasks
+        )
+        if not compatible:
+            raise ValueError(f"no registered adapter supports task {task!r}")
+        compatible_weight = sum(registration.prior_weight for registration in compatible)
+        self.family_registry_ = tuple(
+            FamilyRegistration(
+                registration.adapter,
+                registration.prior_weight / compatible_weight,
             )
+            for registration in compatible
+        )
         self._base_seed = base_seed(self.random_state)
         self._task = task
         self._X_fit_shape = X.shape

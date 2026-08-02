@@ -1,7 +1,14 @@
 import numpy as np
 import pytest
 
-from bayesian_model_averaging import GaussianCovariancePrior, LogisticScalePrior
+from bayesian_model_averaging import (
+    CategoricalPrior,
+    GaussianCovariancePrior,
+    IntegerChoicePrior,
+    LogisticScalePrior,
+    LogUniformPrior,
+    SimplicityCategoricalPrior,
+)
 from bayesian_model_averaging.priors import make_scale_prior
 
 
@@ -85,3 +92,27 @@ def test_gaussian_covariance_prior_simplicity_controls_complexity_penalty():
 
     assert strong.probabilities[0] > simple.probabilities[0]
     assert strong.probabilities[-1] < simple.probabilities[-1]
+
+
+def test_generic_parameter_priors_are_reproducible_and_record_metadata():
+    categorical = CategoricalPrior(["relu", "tanh"], [3.0, 1.0])
+    left = categorical.draw(np.random.default_rng(4))
+    right = categorical.draw(np.random.default_rng(4))
+    assert left == right
+    assert left[0] in {"relu", "tanh"}
+    assert np.isclose(np.exp(left[1]), 0.75 if left[0] == "relu" else 0.25)
+
+    integer = IntegerChoicePrior([1, 2, 3])
+    assert integer.draw(np.random.default_rng(2))[0] in {1, 2, 3}
+
+    simplicity = SimplicityCategoricalPrior(["small", "large"], [1, 10])
+    assert simplicity.probabilities[0] > simplicity.probabilities[1]
+
+
+def test_log_uniform_prior_returns_a_finite_density_draw():
+    value, log_probability, metadata = LogUniformPrior(1e-4, 1e-1).draw(
+        np.random.default_rng(8)
+    )
+    assert 1e-4 < value < 1e-1
+    assert np.isfinite(log_probability)
+    assert metadata == {"low": 1e-4, "high": 1e-1}

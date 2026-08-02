@@ -75,6 +75,11 @@ class FamilyRegistration:
     adapter: EstimatorFamilyAdapter
     prior_weight: float = 1.0
 
+    def get_params(self, deep: bool = True) -> dict[str, Any]:
+        """Expose registration fields so sklearn can clone nested registries."""
+
+        return {"adapter": self.adapter, "prior_weight": self.prior_weight}
+
 
 def _scale_draw_metadata(draw: ScalePriorDraw) -> dict[str, Any]:
     return {
