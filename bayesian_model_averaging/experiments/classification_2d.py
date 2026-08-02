@@ -536,6 +536,15 @@ def plot_probability_heatmap(
             alpha=0.90,
         )
         if len(classes) == 2:
+            ax.contour(
+                xx,
+                yy,
+                probability,
+                levels=[0.25, 0.75],
+                linewidths=1.4,
+                linestyles=":",
+                colors="black",
+            )
             ax.contour(xx, yy, probability, levels=[0.5], linewidths=2, colors="black")
         else:
             boundaries = np.arange(0.5, len(classes) - 0.5, 1.0)
