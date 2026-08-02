@@ -449,19 +449,19 @@ k-NN use `n_jobs=1` to avoid nested parallelism.
 `experiments/classification_2d.py` provides reusable dataset experiments and
 `plot_probability_heatmap`.
 
-- Binary problems retain per-class probability heatmaps with dotted contours
-  at `dotted_threshold` and `1 - dotted_threshold`.
+- Binary problems retain per-class probability heatmaps with thin contours at
+  probability `0.5`.
 - Multiclass problems use one panel. Each class has a `tab10` color, and the
   RGB color is the probability-weighted class-color mixture.
 - Normalized entropy controls saturation: confident class predictions are
   strongly colored, while uncertain mixtures fade toward white.
-- Black contours show argmax class boundaries; the dotted contour marks
-  confidence `1 - dotted_threshold`.
+- Black contours show argmax class boundaries; a thin contour marks confidence
+  `0.5`.
 - A grayscale confidence colorbar explains the whitening scale.
 
 The notebook is intentionally thin: it runs experiments, prints compact
-diagnostics, and displays the returned figures. Plot parameters, including the
-dotted threshold, remain notebook-configurable.
+diagnostics, and displays the returned figures. Padding, grid resolution, and
+output path remain notebook-configurable.
 
 For datasets with a known generating rule, the experiment also reports a
 Bayes-error reference. The equal-isotropic two-Gaussian dataset uses its

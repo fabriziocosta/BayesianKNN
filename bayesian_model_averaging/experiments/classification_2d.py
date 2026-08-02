@@ -715,19 +715,15 @@ def plot_probability_heatmap(
     padding: float = 0.55,
     grid_size: int = 350,
     class_label: Any | None = None,
-    dotted_threshold: float = 0.25,
     output_path: str | Path | None = None,
 ) -> Any:
-    """Plot probability surfaces with configurable uncertainty contours.
+    """Plot probability surfaces with thin 0.5 contours.
 
     Binary problems retain the per-class probability panels. For multiclass
     problems, class probabilities are mixed using the ``tab10`` class colors;
     normalized entropy controls how strongly the mixture is shown, making
     uncertain regions white.
     """
-
-    if not np.isfinite(dotted_threshold) or not 0 < dotted_threshold < 0.5:
-        raise ValueError("dotted_threshold must be finite and strictly between 0 and 0.5")
 
     import matplotlib.pyplot as plt
 
@@ -773,15 +769,14 @@ def plot_probability_heatmap(
             linewidths=2,
             colors="black",
         )
-        confidence_level = 1.0 - dotted_threshold
+        confidence_level = 0.5
         if confidence.min() <= confidence_level <= confidence.max():
             ax.contour(
                 xx,
                 yy,
                 confidence,
                 levels=[confidence_level],
-                linewidths=1.4,
-                linestyles=":",
+                linewidths=1.0,
                 colors="black",
             )
         for class_index, class_value in enumerate(classes):
@@ -838,16 +833,20 @@ def plot_probability_heatmap(
             xx,
             yy,
             probability,
-            levels=[dotted_threshold, 1.0 - dotted_threshold],
-            linewidths=1.4,
-            linestyles=":",
+            levels=[0.5],
+            linewidths=1.0,
             colors="black",
         )
-        if len(classes) == 2:
-            ax.contour(xx, yy, probability, levels=[0.5], linewidths=2, colors="black")
-        else:
+        if len(classes) > 2:
             boundaries = np.arange(0.5, len(classes) - 0.5, 1.0)
-            ax.contour(xx, yy, predicted_indices, levels=boundaries, linewidths=2, colors="black")
+            ax.contour(
+                xx,
+                yy,
+                predicted_indices,
+                levels=boundaries,
+                linewidths=2,
+                colors="black",
+            )
         for class_index, class_value in enumerate(classes):
             mask = result.y_train == class_value
             ax.scatter(
