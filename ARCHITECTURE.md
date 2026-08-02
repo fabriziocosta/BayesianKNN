@@ -131,8 +131,8 @@ class FamilyRegistration:
 registry normalizes positive weights to sum to one, rejects duplicate names,
 and filters families that do not support the requested task. A one-entry
 registry is therefore a fixed-family ensemble. If `family_registry` is not
-specified, the default is a uniform mixture of k-NN, linear, and Gaussian
-families. MLP is available but opt-in.
+specified, the default is a uniform mixture of k-NN, linear, Gaussian, and MLP
+families.
 
 ### Adapter responsibilities
 

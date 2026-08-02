@@ -365,13 +365,13 @@ class MLPAdapter(BaseEstimator):
 def default_family_registry() -> tuple[FamilyRegistration, ...]:
     """Return the default built-in family mixture.
 
-    The entries use equal relative weights.  The registry normalizer converts
-    those weights to a uniform prior over the three default families.
+    The entries use equal relative weights. The registry normalizer converts
+    those weights to a uniform prior over the four default families.
     """
 
     return tuple(
         FamilyRegistration(adapter, prior_weight=1.0)
-        for adapter in (KNNAdapter(), LinearAdapter(), GaussianAdapter())
+        for adapter in (KNNAdapter(), LinearAdapter(), GaussianAdapter(), MLPAdapter())
     )
 
 

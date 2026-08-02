@@ -20,8 +20,8 @@ Available estimators:
 - `BayesianModelAveragingClassifier`, including `predict_proba()`
 - `BayesianModelAveragingRegressor`
 
-The default runtime registry averages k-NN, linear, and Gaussian adapters with
-uniform family prior weights. MLP and new scikit-learn estimator families can be
+The default runtime registry averages k-NN, linear, Gaussian, and MLP adapters
+with uniform family prior weights. New scikit-learn estimator families can be
 registered explicitly with a prior weight and an adapter-owned hyperparameter
 prior without changing the averaging engine.
 

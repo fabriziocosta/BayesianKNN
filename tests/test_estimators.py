@@ -182,9 +182,9 @@ def test_default_registry_contains_built_in_families(data):
         random_state=7,
     ).fit(X, y)
     names = {draw["family_name"] for draw in estimator.get_model_draws()}
-    assert names == {"knn", "linear", "gaussian"}
+    assert names == {"knn", "linear", "gaussian", "mlp"}
     assert all(
-        draw["family_prior_probability"] == pytest.approx(1 / 3)
+        draw["family_prior_probability"] == pytest.approx(1 / 4)
         for draw in estimator.get_model_draws()
     )
     masses = estimator.get_model_masses()
