@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from typing import Any
 
 from bayesian_model_averaging.experiments.classification_2d import (
@@ -19,10 +19,9 @@ def run_and_report(
     dataset_parameters: Mapping[str, Any],
     split_parameters: Mapping[str, Any],
     model_parameters: Mapping[str, Any],
-) -> list[Classification2DResult]:
-    """Run the configured datasets and print compact diagnostics."""
+) -> Iterator[Classification2DResult]:
+    """Run datasets, print diagnostics, and yield each result immediately."""
 
-    results: list[Classification2DResult] = []
     for dataset in datasets:
         result = run_2d_classification_experiment(
             dataset,
@@ -57,5 +56,4 @@ def run_and_report(
             )
         )
         print(format_convergence_history(result))
-        results.append(result)
-    return results
+        yield result
