@@ -115,6 +115,22 @@ def test_mixed_representation_samples_identity_and_projection_families(data):
     assert all(draw["projection_dimension"] == X.shape[1] for draw in identity_draws)
 
 
+@pytest.mark.parametrize("adapter_class", [LinearAdapter, GaussianAdapter])
+@pytest.mark.parametrize("representation", ["identity", "gaussian", "sparse"])
+def test_linear_and_gaussian_adapters_accept_all_representations(
+    data, adapter_class, representation
+):
+    X, y, _ = data
+    estimator = BayesianModelAveragingClassifier(
+        **{
+            **estimator_kwargs(adapter_class()),
+            "representation": representation,
+            "n_estimators": 1,
+        }
+    ).fit(X, y)
+    assert estimator.get_model_draws()[0]["representation_family"] == representation
+
+
 def test_gaussian_adapter_integrates_covariance_structures(data):
     X, y, _ = data
     estimator = BayesianModelAveragingClassifier(

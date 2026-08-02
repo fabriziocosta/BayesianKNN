@@ -114,6 +114,10 @@ complete valid parameter configuration, constructs a scikit-learn estimator,
 and declares any predictive concentration used by the generic scorer. A new
 family can therefore be added without changing the Bayesian integration engine.
 
+The built-in k-NN, linear, and Gaussian adapters are representation-agnostic:
+each accepts identity, Gaussian-projection, and sparse-projection feature
+matrices. MLP currently accepts identity features only.
+
 The built-in adapters are k-NN, linear, Gaussian, and MLP; MLP is not included
 in the default registry. The MLP adapter uses structured priors over
 architecture, activation, regularization, and

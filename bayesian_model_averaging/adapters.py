@@ -171,7 +171,7 @@ class LinearAdapter(BaseEstimator):
 
     name = "linear"
     supported_tasks = frozenset({"classification", "regression"})
-    supported_representations = frozenset({"identity"})
+    supported_representations = frozenset({"identity", "gaussian", "sparse"})
 
     def sample_parameters(
         self,
@@ -211,7 +211,7 @@ class GaussianAdapter(BaseEstimator):
 
     name = "gaussian"
     supported_tasks = frozenset({"classification", "regression"})
-    supported_representations = frozenset({"identity"})
+    supported_representations = frozenset({"identity", "gaussian", "sparse"})
 
     def __init__(self, covariance_prior: GaussianCovariancePrior | None = None) -> None:
         self.covariance_prior = covariance_prior
