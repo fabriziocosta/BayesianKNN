@@ -219,6 +219,44 @@ def format_comparison_table(results: dict[str, DatasetComparisonResult]) -> str:
     return "\n".join(lines)
 
 
+def comparison_results_dataframe(results: dict[str, DatasetComparisonResult]) -> Any:
+    """Return repeated comparison results as a pandas DataFrame.
+
+    The DataFrame contains separate mean and standard-deviation columns so
+    the values remain numeric and can be sorted or plotted directly.
+    """
+
+    import pandas as pd
+
+    if not results:
+        raise ValueError("results must contain at least one dataset")
+
+    rows = []
+    for dataset, result in results.items():
+        for classifier, metrics in result.scores.items():
+            standard_deviations = result.score_stds[classifier]
+            rows.append(
+                {
+                    "dataset": dataset,
+                    "classifier": classifier,
+                    **{
+                        f"{metric}_mean": metrics[metric]
+                        for metric in ("accuracy", "balanced_accuracy", "macro_f1")
+                    },
+                    **{
+                        f"{metric}_std": standard_deviations[metric]
+                        for metric in ("accuracy", "balanced_accuracy", "macro_f1")
+                    },
+                }
+            )
+    return (
+        pd.DataFrame(rows)
+        .set_index(["dataset", "classifier"])
+        .sort_index()
+        .round(4)
+    )
+
+
 def plot_comparison_results(
     results: dict[str, DatasetComparisonResult],
     *,

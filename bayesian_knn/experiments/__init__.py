@@ -7,6 +7,7 @@ from .classification_2d import (
 )
 from .classifier_comparison import (
     DatasetComparisonResult,
+    comparison_results_dataframe,
     format_comparison_table,
     load_standard_dataset,
     plot_comparison_results,
@@ -23,6 +24,7 @@ from .two_moons import (
 __all__ = [
     "Classification2DResult",
     "DatasetComparisonResult",
+    "comparison_results_dataframe",
     "TwoMoonsResult",
     "format_comparison_table",
     "format_convergence_history",

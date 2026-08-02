@@ -25,6 +25,7 @@ test = [
 notebook = [
     "jupyter>=1.0",
     "matplotlib>=3.7",
+    "pandas>=1.5",
 ]
 dev = [
     "bayesian-knn[test]",

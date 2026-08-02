@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 
 from bayesian_knn.experiments.classifier_comparison import (
+    comparison_results_dataframe,
     format_comparison_table,
     load_standard_dataset,
     plot_comparison_results,
@@ -53,6 +54,11 @@ def test_dataset_comparison_returns_all_classifiers_and_metrics():
         random_forest_parameters={"n_estimators": 5, "n_jobs": 1},
     )
     assert "| Dataset | Classifier |" in format_comparison_table(suite)
+    pandas = pytest.importorskip("pandas")
+    frame = comparison_results_dataframe(suite)
+    assert isinstance(frame, pandas.DataFrame)
+    assert frame.index.names == ["dataset", "classifier"]
+    assert {"accuracy_mean", "accuracy_std"}.issubset(frame.columns)
 
 
 def test_repeated_comparison_reports_means_and_sample_standard_deviations():
