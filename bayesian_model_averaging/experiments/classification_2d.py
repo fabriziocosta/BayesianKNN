@@ -86,6 +86,12 @@ class Classification2DResult:
     def largest_weight(self) -> float:
         return float(np.max(self.model_weights))
 
+    @property
+    def model_masses(self) -> dict[str, Any]:
+        """Return posterior mass by model family and family-specific choice."""
+
+        return self.model.get_model_masses()
+
 
 def _canonical_dataset(dataset: str) -> str:
     try:

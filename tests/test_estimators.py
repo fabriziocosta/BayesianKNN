@@ -162,6 +162,48 @@ def test_model_averaging_defaults_to_mixed_family():
     assert BayesianModelAveragingClassifier().get_params()["model_family"] == "mixed"
 
 
+def test_model_masses_report_family_and_nested_choice_mass(data):
+    X, y, _ = data
+    estimator = BayesianModelAveragingClassifier(
+        **{
+            **estimator_kwargs(),
+            "model_family": "mixed",
+            "n_estimators": 20,
+        }
+    ).fit(X, y)
+    masses = estimator.get_model_masses()
+    family_mass = masses["model_family"]
+    draws = estimator.get_model_draws()
+    expected_family_mass = {
+        family: sum(
+            draw["posterior_weight"]
+            for draw in draws
+            if draw["model_family"] == family
+        )
+        for family in ("knn", "linear", "gaussian")
+    }
+
+    assert np.isclose(sum(family_mass.values()), 1.0)
+    assert family_mass == pytest.approx(expected_family_mass)
+    assert masses == estimator.model_masses_
+    assert np.isclose(
+        sum(masses["by_family"]["knn"]["neighborhood_size"].values()), family_mass["knn"]
+    )
+    assert np.isclose(
+        sum(masses["by_family"]["gaussian"]["covariance_structure"].values()),
+        family_mass["gaussian"],
+    )
+    assert np.isclose(
+        sum(masses["by_family"]["knn"]["neighborhood_size_conditional"].values()),
+        1.0,
+    )
+    assert np.isclose(
+        sum(masses["by_family"]["gaussian"]["covariance_structure_conditional"].values()),
+        1.0,
+    )
+    assert {draw["model_family"] for draw in draws} == {"knn", "linear", "gaussian"}
+
+
 def test_parallel_and_serial_draws_are_reproducible(data):
     X, y, _ = data
     serial = BayesianModelAveragingClassifier(**estimator_kwargs()).fit(X, y)

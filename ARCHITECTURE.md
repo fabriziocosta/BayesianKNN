@@ -811,6 +811,25 @@ get_model_draws()
 
 returning a list of dictionaries.
 
+Also expose:
+
+~~~
+get_model_masses()
+~~~
+
+This aggregates the fitted model weights into diagnostics. The
+`model_family` mapping reports global mass for k-NN, linear, and Gaussian
+families and sums to one. Under `by_family.knn`, `neighborhood_size` reports
+the joint mass of each selected k and sums to the k-NN family mass. Under
+`by_family.gaussian`, `covariance_structure` reports the joint mass of
+isotropic, diagonal, and full covariance and sums to the Gaussian family mass.
+Each section also provides a conditional within-family mapping that sums to
+one whenever that family has positive mass. The same structure is available
+as the fitted `model_masses_` attribute.
+
+The 2D experiment result exposes the same report as `result.model_masses` for
+plotting or tabular diagnostics.
+
 ## Public estimator API
 
 Implement:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -47,7 +48,7 @@ class ModelDraw:
     gaussian_covariance_draw: GaussianCovarianceDraw | None = field(default=None, repr=False)
     subset_size: int = 0
     subset_indices: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
-    neighborhood_size: int = 0
+    neighborhood_size: int | None = None
     projection_scale_draw: ScalePriorDraw | None = None
     subset_scale_draw: ScalePriorDraw | None = None
     neighbor_scale_draw: ScalePriorDraw | None = None
@@ -97,3 +98,52 @@ class ModelDraw:
             "log_importance_weight": self.log_importance_weight,
             "posterior_weight": self.posterior_weight,
         }
+
+
+def aggregate_model_masses(draws: Sequence[ModelDraw]) -> dict[str, Any]:
+    """Aggregate posterior mass over families and family-specific choices."""
+
+    if not draws:
+        raise ValueError("draws must contain at least one model")
+    weights = np.asarray([draw.posterior_weight for draw in draws], dtype=float)
+    if np.any(~np.isfinite(weights)) or np.any(weights < 0) or weights.sum() <= 0:
+        raise ValueError("model posterior weights must be finite and non-negative")
+    weights /= weights.sum()
+
+    families = ("knn", "linear", "gaussian")
+    family_mass = {family: 0.0 for family in families}
+    neighborhood_mass: dict[int, float] = {}
+    covariance_mass = {structure: 0.0 for structure in ("isotropic", "diagonal", "full")}
+    for draw, weight in zip(draws, weights):
+        family_mass[draw.model_family] = family_mass.get(draw.model_family, 0.0) + float(weight)
+        if draw.model_family == "knn" and draw.neighborhood_size is not None:
+            neighborhood_mass[draw.neighborhood_size] = (
+                neighborhood_mass.get(draw.neighborhood_size, 0.0) + float(weight)
+            )
+        if draw.model_family == "gaussian" and draw.gaussian_covariance_structure is not None:
+            covariance_mass[draw.gaussian_covariance_structure] += float(weight)
+
+    def conditional_mass(masses: dict[Any, float], family: str) -> dict[Any, float]:
+        total = family_mass[family]
+        if total == 0.0:
+            return {key: 0.0 for key in masses}
+        return {key: value / total for key, value in masses.items()}
+
+    return {
+        "model_family": family_mass,
+        "by_family": {
+            "knn": {
+                "neighborhood_size": dict(sorted(neighborhood_mass.items())),
+                "neighborhood_size_conditional": dict(
+                    sorted(conditional_mass(neighborhood_mass, "knn").items())
+                ),
+            },
+            "linear": {},
+            "gaussian": {
+                "covariance_structure": covariance_mass,
+                "covariance_structure_conditional": conditional_mass(
+                    covariance_mass, "gaussian"
+                ),
+            },
+        },
+    }

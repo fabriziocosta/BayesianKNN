@@ -11,7 +11,7 @@ from sklearn.utils import check_array, check_X_y
 from sklearn.utils.validation import check_is_fitted
 
 from .convergence import compare_predictions, convergence_difference
-from .models import ModelDraw
+from .models import ModelDraw, aggregate_model_masses
 from .priors import (
     GaussianCovariancePrior,
     LogisticScalePrior,
@@ -248,6 +248,7 @@ class BayesianModelAveragingBase(BaseEstimator):
         weights = stable_softmax(np.array([model.log_importance_weight for model in self._models]))
         for model, weight in zip(self._models, weights):
             model.posterior_weight = float(weight)
+        self.model_masses_ = aggregate_model_masses(self._models)
 
     def _validate_predict_X(self, X: Any) -> Any:
         check_is_fitted(self, "_models")
@@ -278,3 +279,15 @@ class BayesianModelAveragingBase(BaseEstimator):
     def get_model_draws(self) -> list[dict[str, Any]]:
         check_is_fitted(self, "_models")
         return [model.to_dict() for model in self._models]
+
+    def get_model_masses(self) -> dict[str, Any]:
+        """Return posterior mass by model family and family-specific choice.
+
+        Family-specific ``*_size`` and ``*_structure`` masses are joint masses
+        on the full ensemble and therefore sum to their parent family mass.
+        The corresponding ``*_conditional`` mappings normalize within that
+        family and sum to one whenever the family has positive mass.
+        """
+
+        check_is_fitted(self, "_models")
+        return aggregate_model_masses(self._models)
