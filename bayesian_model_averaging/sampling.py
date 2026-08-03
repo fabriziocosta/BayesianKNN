@@ -19,10 +19,7 @@ from .adapters import (
 )
 from .models import ModelDraw
 from .priors import LogisticScalePrior, ParameterDraw
-from .representation import make_representation
 from .scoring import classification_cv_score, fit_adapter_estimator, regression_cv_score
-
-REPRESENTATION_FAMILIES = ("gaussian", "sparse", "identity")
 
 
 @dataclass(frozen=True)
@@ -41,15 +38,9 @@ class PreparedModel:
     family_prior_probability: float
     parameters: dict[str, Any]
     parameter_prior: ParameterDraw
-    representation_family: str
-    projection_dimension: int
-    projection_parameters: dict[str, Any]
-    representation_object: Any
-    representation_family_probability: float
     subset_size: int
     subset_indices: np.ndarray
     subset_log_probability: float
-    projection_scale_draw: Any
     subset_scale_draw: Any
     X_subset: Any
     y_subset: np.ndarray
@@ -173,7 +164,6 @@ def prepare_model(
     *,
     task: str,
     family_registry: Sequence[FamilyRegistration],
-    representation: str,
     scale_prior: LogisticScalePrior,
     min_subset_size: int,
     max_subset_size: int,
@@ -184,7 +174,6 @@ def prepare_model(
     classes: np.ndarray | None,
 ) -> PreparedModel:
     rng = np.random.default_rng(seed)
-    n_features = int(X.shape[1])
     family_index = int(
         rng.choice(
             len(family_registry),
@@ -196,40 +185,13 @@ def prepare_model(
     family_name = family_adapter.name
     if task not in family_adapter.supported_tasks:
         raise ValueError(f"adapter {family_name!r} does not support task {task!r}")
-    supported_representations = tuple(
-        family
-        for family in REPRESENTATION_FAMILIES
-        if family in family_adapter.supported_representations
-    )
-    if not supported_representations:
-        raise ValueError(f"adapter {family_name!r} does not support any known representation")
-    if representation == "mixed":
-        representation_family = str(rng.choice(supported_representations))
-        representation_family_probability = 1.0 / len(supported_representations)
-    elif representation in supported_representations:
-        representation_family = representation
-        representation_family_probability = 1.0
-    else:
-        raise ValueError(
-            f"adapter {family_name!r} does not support representation {representation!r}"
-        )
-    projection_values = (
-        [n_features]
-        if representation_family == "identity"
-        else range(1, n_features + 1)
-    )
-    projection_draw = scale_prior.draw(projection_values, rng)
-    projection = make_representation(representation_family, projection_draw.value, seed)
-    sampled_projection_parameters = projection.sample_parameters(seed)
-    transformed = projection.fit_transform(X)
-
     n_splits = n_splits_for_cv(cv)
     feasible_sizes = feasible_subset_sizes(y, task, min_subset_size, max_subset_size, n_splits)
     if not feasible_sizes:
         raise ValueError("no CV-admissible subset size exists")
     subset_draw = scale_prior.draw(feasible_sizes, rng)
     subset = sample_subset(y, subset_draw.value, task, n_splits, rng)
-    X_subset = transformed[subset.indices]
+    X_subset = X[subset.indices]
     y_subset = y[subset.indices]
 
     cv_splitter = make_cv_splitter(task, cv, int(rng.integers(0, 2**32 - 1)))
@@ -255,7 +217,7 @@ def prepare_model(
         min_class_distinct_train_size = min(distinct_counts)
     context = SamplingContext(
         task=task,
-        n_features=int(transformed.shape[1]),
+        n_features=int(X.shape[1]),
         n_classes=None if classes is None else len(classes),
         n_samples=len(y_subset),
         subset_size=int(subset_draw.value),
@@ -276,15 +238,9 @@ def prepare_model(
         family_prior_probability=registration.prior_weight,
         parameters=dict(parameter_prior.parameters),
         parameter_prior=parameter_prior,
-        representation_family=representation_family,
-        projection_dimension=projection_draw.value,
-        projection_parameters={**sampled_projection_parameters, **projection.parameters()},
-        representation_object=projection,
-        representation_family_probability=representation_family_probability,
         subset_size=subset_draw.value,
         subset_indices=subset.indices,
         subset_log_probability=subset.log_probability,
-        projection_scale_draw=projection_draw,
         subset_scale_draw=subset_draw,
         X_subset=X_subset,
         y_subset=y_subset,
@@ -337,8 +293,6 @@ def fit_prepared_model(prepared: PreparedModel, cv_score: float) -> ModelDraw:
     )
     log_prior = (
         np.log(prepared.family_prior_probability)
-        + np.log(prepared.representation_family_probability)
-        + prepared.projection_scale_draw.log_probability
         + prepared.subset_scale_draw.log_probability
         + prepared.subset_log_probability
         + prepared.parameter_prior.log_probability
@@ -348,14 +302,8 @@ def fit_prepared_model(prepared: PreparedModel, cv_score: float) -> ModelDraw:
         family_prior_probability=prepared.family_prior_probability,
         parameters=prepared.parameters,
         parameter_prior=prepared.parameter_prior,
-        representation_family=prepared.representation_family,
-        projection_dimension=prepared.projection_dimension,
-        projection_parameters=prepared.projection_parameters,
-        representation_object=prepared.representation_object,
-        representation_family_probability=prepared.representation_family_probability,
         subset_size=prepared.subset_size,
         subset_indices=prepared.subset_indices,
-        projection_scale_draw=prepared.projection_scale_draw,
         subset_scale_draw=prepared.subset_scale_draw,
         log_prior=float(log_prior),
         log_proposal=float(log_prior),

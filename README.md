@@ -39,6 +39,15 @@ expert weights input-dependent while retaining linear experts. The simpler
 `LinearAdapter` and single-Gaussian `GaussianAdapter` remain available for
 explicit registration.
 
+The optional `recursive-partition` extra exposes four non-bagged recursive
+partition adapters: `RecursivePartitionLinearAdapter`,
+`RecursivePartitionQuadraticAdapter`, `RecursivePartitionRBFAdapter`, and
+`RecursivePartitionQDAAdapter`. The SVM adapters use a simplicity-weighted
+discrete prior over `C` (smaller `C` is simpler). Install the sister package
+with `python -m pip install -e ../RecursiveParitionClassifier` when working
+from the sibling repositories, or install the optional extra when the package
+is available from your package index.
+
 For example, use only a configured k-NN family with:
 
 ```python

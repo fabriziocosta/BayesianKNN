@@ -21,7 +21,6 @@ def test_standard_dataset_loaders_return_numeric_classification_data():
 
 def test_dataset_comparison_returns_all_classifiers_and_metrics():
     parameters = {
-        "representation": "identity",
         "n_estimators": 2,
         "min_subset_size": 10,
         "max_subset_size": 20,
@@ -61,7 +60,6 @@ def test_dataset_comparison_returns_all_classifiers_and_metrics():
 
 def test_repeated_comparison_reports_means_and_sample_standard_deviations():
     parameters = {
-        "representation": "identity",
         "n_estimators": 2,
         "min_subset_size": 10,
         "max_subset_size": 20,
@@ -99,7 +97,6 @@ def test_repeated_comparison_requires_positive_repeat_count():
 def test_comparison_results_can_be_plotted_as_grouped_bars():
     pytest.importorskip("matplotlib")
     parameters = {
-        "representation": "identity",
         "n_estimators": 2,
         "min_subset_size": 10,
         "max_subset_size": 20,

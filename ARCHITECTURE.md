@@ -7,12 +7,11 @@ predictions. It does not optimize one hyperparameter configuration.
 
 ## Design
 
-The core integrates four kinds of uncertainty:
+The core integrates three kinds of uncertainty:
 
 1. estimator family;
-2. feature representation and projection dimension;
-3. training subset;
-4. estimator-family parameters.
+2. training subset;
+3. estimator-family parameters.
 
 Each Monte Carlo draw is a complete, fitted model. The draw records its prior
 and cross-validated score, while the ensemble weight is determined by the
@@ -27,7 +26,7 @@ validate data and CV
         |
 normalize runtime family registry
         |
-sample family -> compatible representation -> projection parameters
+sample family
         |
 sample CV-admissible subset -> construct SamplingContext
         |
@@ -54,11 +53,6 @@ bayesian_model_averaging/
   model_families.py    GaussianClassifier implementation
   convergence.py       prediction-change convergence metrics
   utils.py             deterministic seeds and numerical helpers
-  representation/
-    base.py            representation interface and factory
-    identity.py        unchanged row features
-    gaussian_projection.py
-    sparse_projection.py
   experiments/
     classification_2d.py
 ```
@@ -94,8 +88,7 @@ pipelines, and `GridSearchCV`.
 Important constructor parameters are:
 
 - `family_registry`: runtime estimator-family registrations;
-- `representation`: `"identity"`, `"gaussian"`, `"sparse"`, or `"mixed"`;
-- `scale_prior`: the prior used for projection dimension and subset size;
+- `scale_prior`: the prior used for subset size and ordered adapter parameters;
 - `min_subset_size`, `max_subset_size`, and `cv`;
 - `n_estimators`, or `"auto"` with `max_estimators`;
 - `tolerance`, `convergence_metric`, and `convergence_size`;
@@ -113,7 +106,6 @@ The public interfaces are:
 class EstimatorFamilyAdapter(Protocol):
     name: str
     supported_tasks: frozenset[str]
-    supported_representations: frozenset[str]
 
     def sample_parameters(context, rng) -> ParameterDraw: ...
 
@@ -137,7 +129,7 @@ Gaussian-mixture, MLP, and decision-tree families.
 ### Adapter responsibilities
 
 An adapter owns all family-specific parameter logic. `sample_parameters` gets
-a `SamplingContext` containing task, transformed feature count, class count,
+a `SamplingContext` containing task, input feature count, class count,
 subset size, minimum CV training-fold size, classes, and the shared scale
 prior. For classification it also contains the minimum per-class CV training
 size and minimum distinct per-class training size, which lets class-conditional
@@ -162,15 +154,15 @@ override `predictive_concentration`, but the value must be positive and finite.
 
 ### Built-in adapters
 
-| Adapter | Classification | Regression | Representations | Main parameters |
-| --- | --- | --- | --- | --- |
-| `KNNAdapter` | `KNeighborsClassifier` | `KNeighborsRegressor` | identity, Gaussian projection, sparse projection | `n_neighbors`, `weights`, `metric` |
-| `LinearAdapter` | `LogisticRegression` | `Ridge` | identity, Gaussian projection, sparse projection | solver/iterations or ridge `alpha` |
-| `GaussianAdapter` | `GaussianClassifier` | `BayesianRidge` | identity, Gaussian projection, sparse projection | classification covariance structure |
-| `GaussianMixtureAdapter` | class-conditional `GaussianMixture` | — | identity, Gaussian projection, sparse projection | `n_components` up to 30, covariance structure |
-| `LinearMixtureAdapter` | gated logistic experts | gated ridge experts | identity, Gaussian projection, sparse projection | expert count, expert/gate regularization |
-| `MLPAdapter` | `MLPClassifier` | `MLPRegressor` | identity | architecture, activation, regularization, learning rate |
-| `DecisionTreeAdapter` | `DecisionTreeClassifier` | `DecisionTreeRegressor` | identity, Gaussian projection, sparse projection | depth, split/leaf sizes, criterion, splitter |
+| Adapter | Classification | Regression | Main parameters |
+| --- | --- | --- | --- |
+| `KNNAdapter` | `KNeighborsClassifier` | `KNeighborsRegressor` | `n_neighbors`, `weights`, `metric` |
+| `LinearAdapter` | `LogisticRegression` | `Ridge` | solver/iterations or ridge `alpha` |
+| `GaussianAdapter` | `GaussianClassifier` | `BayesianRidge` | classification covariance structure |
+| `GaussianMixtureAdapter` | class-conditional `GaussianMixture` | — | `n_components` up to 30, covariance structure |
+| `LinearMixtureAdapter` | gated logistic experts | gated ridge experts | expert count, expert/gate regularization |
+| `MLPAdapter` | `MLPClassifier` | `MLPRegressor` | architecture, activation, regularization, learning rate |
+| `DecisionTreeAdapter` | `DecisionTreeClassifier` | `DecisionTreeRegressor` | depth, split/leaf sizes, criterion, splitter |
 
 The `GaussianAdapter` fits a single Gaussian likelihood for every class. The
 default `GaussianMixtureAdapter` instead fits a separate Gaussian mixture for
@@ -200,8 +192,6 @@ model record, and estimator classes do not need modification.
 class ToyAdapter:
     name = "toy"
     supported_tasks = frozenset({"classification"})
-    supported_representations = frozenset({"identity"})
-
     def sample_parameters(self, context, rng):
         value, log_probability, metadata = my_prior.draw(rng)
         return ParameterDraw(
@@ -221,32 +211,6 @@ model = BayesianModelAveragingClassifier(
 )
 ```
 
-## Representations
-
-The representation is sampled independently for each model draw, subject to
-the selected adapter's `supported_representations`.
-
-- `identity` passes the row features through unchanged.
-- `gaussian` uses a Gaussian random projection.
-- `sparse` uses a sparse random projection.
-- `mixed` samples uniformly from the compatible representation families for
-  that adapter.
-
-There is no separate `auto` spelling in the current API; `mixed` is the mode
-that integrates over identity, Gaussian, and sparse representations where the
-adapter permits them. Thus `representation="identity"` always uses the input
-row features, while `representation="mixed"` can use any compatible option on
-different draws.
-
-Projection dimensions are sampled from the shared `LogisticScalePrior` over
-`1..n_features`. Identity uses the singleton dimension `[n_features]`, so it
-never truncates the feature space. The representation object is fitted on the
-sampled training data and retained with the model draw for prediction.
-
-Linear and Gaussian adapters are representation-agnostic in this design: they
-consume whichever transformed feature matrix the core supplies. MLP remains
-identity-only until its projected-feature behavior is explicitly validated.
-
 ## Priors
 
 `priors.py` contains reusable prior objects. Each prior returns both a sampled
@@ -255,8 +219,8 @@ for diagnostics.
 
 ### Ordered scale prior
 
-`LogisticScalePrior` is shared by projection dimension and subset size, and is
-available to adapters for ordered parameters such as k-NN neighbourhood size.
+`LogisticScalePrior` is shared by subset size and is available to adapters for
+ordered parameters such as k-NN neighbourhood size.
 For ordered values with normalized positions `u`, each draw samples:
 
 ```text
@@ -296,15 +260,14 @@ covers `hidden_layer_sizes`, activation (including `logistic`), `alpha`, and
 seed:
 
 1. select a registered family using normalized family weights;
-2. validate the selected task and choose a compatible representation;
-3. sample projection dimension and fit the representation;
-4. sample an admissible subset size and a subset uniformly conditional on that
+2. validate the selected task;
+3. sample an admissible subset size and a subset uniformly conditional on that
    size;
-5. construct the CV splitter and `SamplingContext`;
-6. ask the adapter for a complete parameter draw;
-7. score the configuration through the generic scorer;
-8. build and fit the final estimator on the transformed subset;
-9. store the resulting `ModelDraw`.
+4. construct the CV splitter and `SamplingContext`;
+5. ask the adapter for a complete parameter draw;
+6. score the configuration through the generic scorer;
+7. build and fit the final estimator on the sampled subset;
+8. store the resulting `ModelDraw`.
 
 Classification subsets must contain at least `cv` observations from every
 global class. Regression subsets must contain at least `cv` observations.
@@ -316,16 +279,13 @@ The stored prior contribution is:
 ```text
 log_prior =
     log(family prior)
-  + log(representation prior)
-  + projection-scale log probability
   + subset-size log probability
   + conditional subset log probability
   + adapter-parameter log probability
 ```
 
 `log_proposal` is equal to `log_prior` because the current sampler proposes
-directly from the declared prior. Projection-matrix density terms are not
-added because the matrix is sampled from the representation's prior.
+directly from the declared prior.
 
 ## Generic scoring
 
@@ -387,13 +347,8 @@ family_name
 family_prior_probability
 parameters
 parameter_prior
-representation_family
-representation_family_probability
-projection_dimension
-projection_parameters
 subset_size
 subset_indices
-projection_scale_draw
 subset_scale_draw
 log_prior
 log_proposal
@@ -479,15 +434,15 @@ includes the model-error/Bayes-error ratio when available.
 To add a family:
 
 1. implement the adapter protocol;
-2. declare supported tasks and representations;
+2. declare supported tasks;
 3. implement the complete conditional parameter prior;
 4. build a fresh sklearn estimator from the sampled parameters;
 5. ensure classification estimators expose `predict_proba`;
 6. register the adapter with `FamilyRegistration`.
 
 No changes to `base.py`, `sampling.py`, `scoring.py`, `models.py`, or the
-public estimator classes should be required. Add tests for task and
-representation validation, deterministic sampling, exact joint prior logging,
+public estimator classes should be required. Add tests for task validation,
+deterministic sampling, exact joint prior logging,
 class alignment, scoring, serialization, sklearn cloning, and deterministic
 parallel fitting.
 

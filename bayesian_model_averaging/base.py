@@ -30,15 +30,14 @@ from .utils import base_seed, child_seed, stable_softmax
 
 
 def _predict_single(model: ModelDraw, X: Any, task: str, classes: np.ndarray | None) -> np.ndarray:
-    transformed = model.representation_object.transform(X)
     if task == "classification":
-        probabilities = model.estimator.predict_proba(transformed)
+        probabilities = model.estimator.predict_proba(X)
         aligned = np.zeros((len(probabilities), len(classes)), dtype=float)
         positions = {label: index for index, label in enumerate(classes)}
         for local_index, label in enumerate(model.estimator.classes_):
             aligned[:, positions[label]] = probabilities[:, local_index]
         return aligned
-    return np.asarray(model.estimator.predict(transformed), dtype=float)
+    return np.asarray(model.estimator.predict(X), dtype=float)
 
 
 class BayesianModelAveragingBase(BaseEstimator):
@@ -46,7 +45,6 @@ class BayesianModelAveragingBase(BaseEstimator):
 
     def __init__(
         self,
-        representation: str = "mixed",
         family_registry: Sequence[FamilyRegistration | EstimatorFamilyAdapter] | None = None,
         scale_prior: LogisticScalePrior | None = None,
         min_subset_size: int | None = None,
@@ -63,7 +61,6 @@ class BayesianModelAveragingBase(BaseEstimator):
         n_jobs: int | None = -1,
         random_state: Any = None,
     ) -> None:
-        self.representation = representation
         self.family_registry = family_registry
         self.scale_prior = scale_prior
         self.min_subset_size = min_subset_size
@@ -81,10 +78,6 @@ class BayesianModelAveragingBase(BaseEstimator):
         self.random_state = random_state
 
     def _validate_parameters(self) -> None:
-        if self.representation not in {"gaussian", "sparse", "identity", "mixed"}:
-            raise ValueError(
-                "representation must be 'mixed', 'gaussian', 'sparse', or 'identity'"
-            )
         if self.n_estimators != "auto" and (
             isinstance(self.n_estimators, bool)
             or not isinstance(self.n_estimators, (int, np.integer))
@@ -224,7 +217,6 @@ class BayesianModelAveragingBase(BaseEstimator):
             y,
             task=self._task,
             family_registry=self.family_registry_,
-            representation=self.representation,
             scale_prior=self.scale_prior_,
             min_subset_size=(
                 int(self.min_subset_size)

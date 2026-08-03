@@ -21,6 +21,10 @@ from bayesian_model_averaging import (
     LogisticScalePrior,
     MLPAdapter,
     ParameterDraw,
+    RecursivePartitionLinearAdapter,
+    RecursivePartitionQuadraticAdapter,
+    RecursivePartitionQDAAdapter,
+    RecursivePartitionRBFAdapter,
     SamplingContext,
 )
 from bayesian_model_averaging.scoring import regression_cv_score
@@ -43,7 +47,6 @@ def registration(adapter, weight=1.0):
 def estimator_kwargs(adapter=None):
     return dict(
         family_registry=registration(adapter or KNNAdapter()),
-        representation="identity",
         min_subset_size=9,
         max_subset_size=18,
         cv=3,
@@ -80,6 +83,36 @@ def test_builtin_classifier_concentrations_are_comparable():
     assert MLPAdapter().predictive_concentration("classification", {}) == 1.0
 
 
+def test_recursive_partition_adapters_sample_simple_c_values():
+    pytest.importorskip("recursive_partition")
+    context = SamplingContext(
+        task="classification",
+        n_features=2,
+        n_classes=2,
+        n_samples=30,
+        subset_size=20,
+        min_train_size=15,
+        classes=np.array([0, 1]),
+        scale_prior=None,
+    )
+    for adapter_class in (
+        RecursivePartitionLinearAdapter,
+        RecursivePartitionQuadraticAdapter,
+        RecursivePartitionRBFAdapter,
+    ):
+        adapter = adapter_class(c_values=(0.1, 1.0, 10.0), simplicity=2.0)
+        draw = adapter.sample_parameters(context, np.random.default_rng(4))
+        assert draw.parameters["C"] in {0.1, 1.0, 10.0}
+        assert draw.metadata["C"]["probability"] > 0
+        estimator = adapter.build_estimator("classification", draw.parameters, 4)
+        assert estimator.base_estimator.kernel in {"linear", "poly", "rbf"}
+
+    qda = RecursivePartitionQDAAdapter().build_estimator(
+        "classification", {"reg_param": 0.05}, 4
+    )
+    assert qda.base_estimator.reg_param == pytest.approx(0.05)
+
+
 def test_regressor_predicts_and_scores(data):
     X, _, y = data
     estimator = BayesianModelAveragingRegressor(**estimator_kwargs()).fit(X, y)
@@ -89,15 +122,9 @@ def test_regressor_predicts_and_scores(data):
     assert np.isfinite(estimator.score(X, y))
 
 
-@pytest.mark.parametrize("representation", ["identity", "gaussian", "sparse"])
-def test_classifier_accepts_csr_inputs_for_all_representations(data, representation):
+def test_classifier_accepts_csr_inputs(data):
     X, y, _ = data
-    estimator = BayesianModelAveragingClassifier(
-        **{
-            **estimator_kwargs(),
-            "representation": representation,
-        }
-    ).fit(csr_matrix(X), y)
+    estimator = BayesianModelAveragingClassifier(**estimator_kwargs()).fit(csr_matrix(X), y)
     probabilities = estimator.predict_proba(csr_matrix(X[:5]))
     assert probabilities.shape == (5, 3)
     assert np.allclose(probabilities.sum(axis=1), 1.0)
@@ -109,39 +136,6 @@ def test_regressor_accepts_csr_inputs(data):
     prediction = estimator.predict(csr_matrix(X[:5]))
     assert prediction.shape == (5,)
     assert np.all(np.isfinite(prediction))
-
-
-def test_mixed_representation_samples_identity_and_projection_families(data):
-    X, y, _ = data
-    estimator = BayesianModelAveragingClassifier(
-        **{
-            **estimator_kwargs(),
-            "family_registry": registration(KNNAdapter()),
-            "representation": "mixed",
-            "n_estimators": 20,
-        }
-    ).fit(X, y)
-    draws = estimator.get_model_draws()
-    families = {draw["representation_family"] for draw in draws}
-    assert families == {"identity", "gaussian", "sparse"}
-    identity_draws = [draw for draw in draws if draw["representation_family"] == "identity"]
-    assert all(draw["projection_dimension"] == X.shape[1] for draw in identity_draws)
-
-
-@pytest.mark.parametrize("adapter_class", [LinearAdapter, GaussianAdapter])
-@pytest.mark.parametrize("representation", ["identity", "gaussian", "sparse"])
-def test_linear_and_gaussian_adapters_accept_all_representations(
-    data, adapter_class, representation
-):
-    X, y, _ = data
-    estimator = BayesianModelAveragingClassifier(
-        **{
-            **estimator_kwargs(adapter_class()),
-            "representation": representation,
-            "n_estimators": 1,
-        }
-    ).fit(X, y)
-    assert estimator.get_model_draws()[0]["representation_family"] == representation
 
 
 def test_gaussian_adapter_integrates_covariance_structures(data):
@@ -197,7 +191,6 @@ def test_linear_adapter_is_valid_for_both_tasks(data, task):
 def test_default_registry_contains_built_in_families(data):
     X, y, _ = data
     estimator = BayesianModelAveragingClassifier(
-        representation="identity",
         min_subset_size=9,
         max_subset_size=18,
         cv=3,
@@ -313,7 +306,6 @@ def test_decision_tree_adapter_supports_classification_and_regression(data):
 class ToyClassifierAdapter(BaseEstimator):
     name = "toy"
     supported_tasks = frozenset({"classification"})
-    supported_representations = frozenset({"identity"})
 
     def sample_parameters(
         self, context: SamplingContext, rng: np.random.Generator
@@ -335,7 +327,6 @@ class ToyClassifierAdapter(BaseEstimator):
 class ToyRegressorAdapter(BaseEstimator):
     name = "toy-regressor"
     supported_tasks = frozenset({"regression"})
-    supported_representations = frozenset({"identity"})
 
     def sample_parameters(
         self, context: SamplingContext, rng: np.random.Generator
@@ -441,7 +432,7 @@ def test_estimator_is_cloneable_and_works_in_grid_search(data):
     assert search.best_estimator_.predict(X[:2]).shape == (2,)
 
 
-def test_one_prior_instance_drives_projection_subset_and_knn_draws(data):
+def test_one_prior_instance_drives_subset_and_knn_draws(data):
     X, y, _ = data
 
     class CountingPrior:
@@ -457,7 +448,7 @@ def test_one_prior_instance_drives_projection_subset_and_knn_draws(data):
     BayesianModelAveragingClassifier(
         **{**estimator_kwargs(), "scale_prior": prior, "n_jobs": 1, "n_estimators": 1}
     ).fit(X, y)
-    assert prior.calls == 3
+    assert prior.calls == 2
 
 
 def test_regression_scoring_uses_training_fold_variance(data):

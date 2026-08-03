@@ -27,6 +27,9 @@ notebook = [
     "matplotlib>=3.7",
     "pandas>=1.5",
 ]
+recursive-partition = [
+    "recursive-partition-classifier>=0.1.0",
+]
 dev = [
     "bayesian-model-averaging[test]",
     "bayesian-model-averaging[notebook]",

@@ -51,7 +51,6 @@ class EstimatorFamilyAdapter(Protocol):
 
     name: str
     supported_tasks: frozenset[str]
-    supported_representations: frozenset[str]
 
     def sample_parameters(
         self,
@@ -119,7 +118,6 @@ class KNNAdapter(BaseEstimator):
 
     name = "knn"
     supported_tasks = frozenset({"classification", "regression"})
-    supported_representations = frozenset({"identity", "gaussian", "sparse"})
 
     def __init__(
         self,
@@ -182,7 +180,6 @@ class DecisionTreeAdapter(BaseEstimator):
 
     name = "decision_tree"
     supported_tasks = frozenset({"classification", "regression"})
-    supported_representations = frozenset({"identity", "gaussian", "sparse"})
 
     def __init__(
         self,
@@ -321,7 +318,6 @@ class LinearAdapter(BaseEstimator):
 
     name = "linear"
     supported_tasks = frozenset({"classification", "regression"})
-    supported_representations = frozenset({"identity", "gaussian", "sparse"})
 
     def sample_parameters(
         self,
@@ -356,12 +352,290 @@ class LinearAdapter(BaseEstimator):
         return 1.0
 
 
+def _recursive_partition_components() -> tuple[Any, Any, Any]:
+    """Load the optional recursive-partition classifier implementation."""
+
+    try:
+        from recursive_partition import EqualPriorQDA, RecursivePartitionClassifier
+        from sklearn.svm import SVC
+    except ImportError as error:
+        raise ImportError(
+            "RecursivePartition*Adapter requires the optional "
+            "'recursive-partition-classifier' package. Install the sister "
+            "repository or add it to PYTHONPATH."
+        ) from error
+    return RecursivePartitionClassifier, EqualPriorQDA, SVC
+
+
+class _RecursivePartitionSVCAdapter(BaseEstimator):
+    """Shared simplicity-prior implementation for recursive SVM adapters."""
+
+    supported_tasks = frozenset({"classification"})
+
+    def __init__(
+        self,
+        kernel: str,
+        *,
+        degree: int = 3,
+        coef0: float = 0.0,
+        gamma: str | float = "scale",
+        c_values: Sequence[float] = (0.01, 0.1, 1.0, 10.0, 100.0),
+        simplicity: float = 1.0,
+        class_weight: str | dict[Any, float] | None = "balanced",
+        probability_mode: str = "leaf_frequency",
+        probability_smoothing: float = 1.0,
+        on_fit_failure: str = "leaf",
+        max_depth: int | None = None,
+        max_nodes: int | None = None,
+    ) -> None:
+        self.kernel = kernel
+        self.degree = degree
+        self.coef0 = coef0
+        self.gamma = gamma
+        self.c_values = tuple(c_values)
+        self.simplicity = simplicity
+        self.class_weight = class_weight
+        self.probability_mode = probability_mode
+        self.probability_smoothing = probability_smoothing
+        self.on_fit_failure = on_fit_failure
+        self.max_depth = max_depth
+        self.max_nodes = max_nodes
+
+    def sample_parameters(
+        self,
+        context: SamplingContext,
+        rng: np.random.Generator,
+    ) -> ParameterDraw:
+        if context.task != "classification":
+            raise ValueError(f"{self.name} supports classification only")
+        c_values = tuple(float(value) for value in self.c_values)
+        if (
+            not c_values
+            or any(not np.isfinite(value) or value <= 0 for value in c_values)
+            or len(set(c_values)) != len(c_values)
+        ):
+            raise ValueError("c_values must contain distinct, finite, positive values")
+        if not np.isfinite(self.simplicity) or self.simplicity <= 0:
+            raise ValueError("simplicity must be finite and positive")
+
+        # Lower C means stronger margin regularization and a simpler SVM.
+        c_prior = SimplicityCategoricalPrior(
+            c_values,
+            complexities=c_values,
+            simplicity=float(self.simplicity),
+        )
+        c_value, c_log_probability, c_metadata = c_prior.draw(rng)
+        return ParameterDraw(
+            parameters={
+                "C": float(c_value),
+                "kernel": self.kernel,
+                "degree": int(self.degree),
+                "coef0": float(self.coef0),
+                "gamma": self.gamma,
+                "class_weight": self.class_weight,
+            },
+            log_probability=float(c_log_probability),
+            metadata={
+                "C": _categorical_metadata(c_value, c_log_probability, c_metadata),
+            },
+        )
+
+    def build_estimator(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+        random_state: int,
+    ) -> BaseEstimator:
+        if task != "classification":
+            raise ValueError(f"{self.name} supports classification only")
+        RecursivePartitionClassifier, _, SVC = _recursive_partition_components()
+        base_estimator = SVC(
+            C=float(parameters["C"]),
+            kernel=str(parameters.get("kernel", self.kernel)),
+            degree=int(parameters.get("degree", self.degree)),
+            coef0=float(parameters.get("coef0", self.coef0)),
+            gamma=parameters.get("gamma", self.gamma),
+            class_weight=parameters.get("class_weight", self.class_weight),
+            random_state=random_state,
+        )
+        return RecursivePartitionClassifier(
+            base_estimator=base_estimator,
+            probability_mode=self.probability_mode,
+            probability_smoothing=float(self.probability_smoothing),
+            on_fit_failure=self.on_fit_failure,
+            max_depth=self.max_depth,
+            max_nodes=self.max_nodes,
+        )
+
+    def predictive_concentration(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+    ) -> float:
+        return 1.0
+
+
+class RecursivePartitionLinearAdapter(_RecursivePartitionSVCAdapter):
+    """Adapter for a non-bagged recursive partitioner driven by a linear SVM."""
+
+    name = "recursive_linear"
+
+    def __init__(
+        self,
+        c_values: Sequence[float] = (0.01, 0.1, 1.0, 10.0, 100.0),
+        simplicity: float = 1.0,
+        class_weight: str | dict[Any, float] | None = "balanced",
+        probability_mode: str = "leaf_frequency",
+        probability_smoothing: float = 1.0,
+        on_fit_failure: str = "leaf",
+        max_depth: int | None = None,
+        max_nodes: int | None = None,
+    ) -> None:
+        super().__init__(
+            "linear",
+            c_values=c_values,
+            simplicity=simplicity,
+            class_weight=class_weight,
+            probability_mode=probability_mode,
+            probability_smoothing=probability_smoothing,
+            on_fit_failure=on_fit_failure,
+            max_depth=max_depth,
+            max_nodes=max_nodes,
+        )
+
+
+class RecursivePartitionQuadraticAdapter(_RecursivePartitionSVCAdapter):
+    """Adapter for a non-bagged recursive partitioner driven by a degree-two SVM."""
+
+    name = "recursive_quadratic"
+
+    def __init__(
+        self,
+        c_values: Sequence[float] = (0.01, 0.1, 1.0, 10.0, 100.0),
+        simplicity: float = 1.0,
+        gamma: str | float = "scale",
+        class_weight: str | dict[Any, float] | None = "balanced",
+        probability_mode: str = "leaf_frequency",
+        probability_smoothing: float = 1.0,
+        on_fit_failure: str = "leaf",
+        max_depth: int | None = None,
+        max_nodes: int | None = None,
+    ) -> None:
+        super().__init__(
+            "poly",
+            degree=2,
+            coef0=1.0,
+            gamma=gamma,
+            c_values=c_values,
+            simplicity=simplicity,
+            class_weight=class_weight,
+            probability_mode=probability_mode,
+            probability_smoothing=probability_smoothing,
+            on_fit_failure=on_fit_failure,
+            max_depth=max_depth,
+            max_nodes=max_nodes,
+        )
+
+
+class RecursivePartitionRBFAdapter(_RecursivePartitionSVCAdapter):
+    """Adapter for a non-bagged recursive partitioner driven by an RBF SVM."""
+
+    name = "recursive_rbf"
+
+    def __init__(
+        self,
+        c_values: Sequence[float] = (0.01, 0.1, 1.0, 10.0, 100.0),
+        simplicity: float = 1.0,
+        gamma: str | float = "scale",
+        class_weight: str | dict[Any, float] | None = "balanced",
+        probability_mode: str = "leaf_frequency",
+        probability_smoothing: float = 1.0,
+        on_fit_failure: str = "leaf",
+        max_depth: int | None = None,
+        max_nodes: int | None = None,
+    ) -> None:
+        super().__init__(
+            "rbf",
+            gamma=gamma,
+            c_values=c_values,
+            simplicity=simplicity,
+            class_weight=class_weight,
+            probability_mode=probability_mode,
+            probability_smoothing=probability_smoothing,
+            on_fit_failure=on_fit_failure,
+            max_depth=max_depth,
+            max_nodes=max_nodes,
+        )
+
+
+class RecursivePartitionQDAAdapter(BaseEstimator):
+    """Adapter for a non-bagged recursive partitioner driven by equal-prior QDA."""
+
+    name = "recursive_qda"
+    supported_tasks = frozenset({"classification"})
+
+    def __init__(
+        self,
+        reg_param: float = 0.05,
+        probability_mode: str = "leaf_frequency",
+        probability_smoothing: float = 1.0,
+        on_fit_failure: str = "leaf",
+        max_depth: int | None = None,
+        max_nodes: int | None = None,
+    ) -> None:
+        self.reg_param = reg_param
+        self.probability_mode = probability_mode
+        self.probability_smoothing = probability_smoothing
+        self.on_fit_failure = on_fit_failure
+        self.max_depth = max_depth
+        self.max_nodes = max_nodes
+
+    def sample_parameters(
+        self,
+        context: SamplingContext,
+        rng: np.random.Generator,
+    ) -> ParameterDraw:
+        if context.task != "classification":
+            raise ValueError(f"{self.name} supports classification only")
+        return ParameterDraw(
+            parameters={"reg_param": float(self.reg_param)},
+            log_probability=0.0,
+            metadata={},
+        )
+
+    def build_estimator(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+        random_state: int,
+    ) -> BaseEstimator:
+        if task != "classification":
+            raise ValueError(f"{self.name} supports classification only")
+        RecursivePartitionClassifier, EqualPriorQDA, _ = _recursive_partition_components()
+        return RecursivePartitionClassifier(
+            base_estimator=EqualPriorQDA(
+                reg_param=float(parameters.get("reg_param", self.reg_param))
+            ),
+            probability_mode=self.probability_mode,
+            probability_smoothing=float(self.probability_smoothing),
+            on_fit_failure=self.on_fit_failure,
+            max_depth=self.max_depth,
+            max_nodes=self.max_nodes,
+        )
+
+    def predictive_concentration(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+    ) -> float:
+        return 1.0
+
+
 class LinearMixtureAdapter(BaseEstimator):
     """Adapter for gated mixtures of logistic or ridge linear experts."""
 
     name = "linear_mixture"
     supported_tasks = frozenset({"classification", "regression"})
-    supported_representations = frozenset({"identity", "gaussian", "sparse"})
 
     def __init__(
         self,
@@ -465,7 +739,6 @@ class GaussianAdapter(BaseEstimator):
 
     name = "gaussian"
     supported_tasks = frozenset({"classification", "regression"})
-    supported_representations = frozenset({"identity", "gaussian", "sparse"})
 
     def __init__(self, covariance_prior: GaussianCovariancePrior | None = None) -> None:
         self.covariance_prior = covariance_prior
@@ -515,7 +788,6 @@ class GaussianMixtureAdapter(BaseEstimator):
 
     name = "gaussian_mixture"
     supported_tasks = frozenset({"classification"})
-    supported_representations = frozenset({"identity", "gaussian", "sparse"})
 
     def __init__(
         self,
@@ -622,7 +894,6 @@ class MLPAdapter(BaseEstimator):
 
     name = "mlp"
     supported_tasks = frozenset({"classification", "regression"})
-    supported_representations = frozenset({"identity"})
 
     def __init__(
         self,
@@ -759,8 +1030,6 @@ def normalize_family_registry(
             raise ValueError(f"duplicate estimator-family adapter name: {name}")
         if not getattr(adapter, "supported_tasks", None):
             raise ValueError(f"adapter {name!r} must declare supported_tasks")
-        if not getattr(adapter, "supported_representations", None):
-            raise ValueError(f"adapter {name!r} must declare supported_representations")
         weight = float(registration.prior_weight)
         if not np.isfinite(weight) or weight <= 0:
             raise ValueError("family prior weights must be finite and positive")

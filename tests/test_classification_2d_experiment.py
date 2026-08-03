@@ -12,7 +12,6 @@ from bayesian_model_averaging.experiments.classification_2d import (
 
 def _small_model_parameters():
     return {
-        "representation": "identity",
         "n_estimators": 2,
         "min_subset_size": 10,
         "max_subset_size": 20,

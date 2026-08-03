@@ -33,14 +33,8 @@ class ModelDraw:
     family_prior_probability: float
     parameters: dict[str, Any]
     parameter_prior: ParameterDraw
-    representation_family: str
-    projection_dimension: int
-    projection_parameters: dict[str, Any]
-    representation_object: Any = field(repr=False)
-    representation_family_probability: float = 1.0
     subset_size: int = 0
     subset_indices: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=int))
-    projection_scale_draw: ScalePriorDraw | None = None
     subset_scale_draw: ScalePriorDraw | None = None
     log_prior: float = 0.0
     log_proposal: float = 0.0
@@ -53,20 +47,14 @@ class ModelDraw:
         self.log_importance_weight = self.cv_log_pseudo_likelihood
 
     def to_dict(self) -> dict[str, Any]:
-        projection_draw = self.projection_scale_draw
         subset_draw = self.subset_scale_draw
         return {
             "family_name": self.family_name,
             "family_prior_probability": self.family_prior_probability,
             "parameters": dict(self.parameters),
             "parameter_prior": self.parameter_prior.to_dict(),
-            "representation_family": self.representation_family,
-            "representation_family_probability": self.representation_family_probability,
-            "projection_dimension": self.projection_dimension,
-            "projection_parameters": dict(self.projection_parameters),
             "subset_size": self.subset_size,
             "subset_indices": self.subset_indices.copy(),
-            "projection_scale_draw": _scale_draw_dict(projection_draw),
             "subset_scale_draw": _scale_draw_dict(subset_draw),
             "log_prior": self.log_prior,
             "log_proposal": self.log_proposal,
