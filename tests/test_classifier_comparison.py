@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from bayesian_model_averaging.experiments.classifier_comparison import (
+from bayesian_predictive_model_averaging.experiments.classifier_comparison import (
     comparison_results_dataframe,
     load_standard_dataset,
     plot_comparison_results,

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from bayesian_model_averaging.sampling import sample_subset
+from bayesian_predictive_model_averaging.sampling import sample_subset
 
 
 def test_classification_subset_is_cv_admissible_and_probability_is_conditional():
@@ -24,7 +24,7 @@ def test_regression_subset_probability_is_uniform_without_replacement():
 
 
 def test_logistic_sampling_is_centralized_in_the_prior_module():
-    package_root = Path(__file__).parents[1] / "bayesian_model_averaging"
+    package_root = Path(__file__).parents[1] / "bayesian_predictive_model_averaging"
     occurrences = 0
     for path in package_root.rglob("*.py"):
         occurrences += path.read_text().count("logaddexp")

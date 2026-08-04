@@ -37,7 +37,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["bayesian_model_averaging"]
+packages = ["bayesian_predictive_model_averaging"]
 
 [tool.pytest.ini_options]
 addopts = "-ra"

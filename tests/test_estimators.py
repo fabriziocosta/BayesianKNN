@@ -8,7 +8,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.tree import DecisionTreeClassifier
 
-from bayesian_model_averaging import (
+from bayesian_predictive_model_averaging import (
     BayesianPredictiveModelAveragingClassifier,
     BayesianPredictiveModelAveragingRegressor,
     DecisionTreeAdapter,
@@ -22,13 +22,13 @@ from bayesian_model_averaging import (
     MLPAdapter,
     ParameterDraw,
     RecursivePartitionLinearAdapter,
-    RecursivePartitionQuadraticAdapter,
     RecursivePartitionQDAAdapter,
+    RecursivePartitionQuadraticAdapter,
     RecursivePartitionRBFAdapter,
     SamplingContext,
 )
-from bayesian_model_averaging.scoring import regression_cv_score
-from bayesian_model_averaging.utils import stable_softmax
+from bayesian_predictive_model_averaging.scoring import regression_cv_score
+from bayesian_predictive_model_averaging.utils import stable_softmax
 
 
 @pytest.fixture

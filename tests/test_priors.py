@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from bayesian_model_averaging import (
+from bayesian_predictive_model_averaging import (
     CategoricalPrior,
     GaussianCovariancePrior,
     IntegerChoicePrior,
@@ -9,7 +9,7 @@ from bayesian_model_averaging import (
     LogUniformPrior,
     SimplicityCategoricalPrior,
 )
-from bayesian_model_averaging.priors import make_scale_prior
+from bayesian_predictive_model_averaging.priors import make_scale_prior
 
 
 def test_logistic_scale_prior_is_normalized_and_monotone():

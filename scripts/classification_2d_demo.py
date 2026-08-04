@@ -6,7 +6,7 @@ from collections.abc import Iterator, Mapping, Sequence
 from time import perf_counter
 from typing import Any
 
-from bayesian_model_averaging.experiments.classification_2d import (
+from bayesian_predictive_model_averaging.experiments.classification_2d import (
     Classification2DResult,
     format_convergence_history,
     format_error_comparison,

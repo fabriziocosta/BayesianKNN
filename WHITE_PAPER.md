@@ -218,7 +218,7 @@ be persisted with experiment results.
 The public estimators are:
 
 ```python
-from bayesian_model_averaging import (
+from bayesian_predictive_model_averaging import (
     BayesianPredictiveModelAveragingClassifier,
     BayesianPredictiveModelAveragingRegressor,
 )

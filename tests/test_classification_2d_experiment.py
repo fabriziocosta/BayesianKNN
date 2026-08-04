@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from bayesian_model_averaging.experiments.classification_2d import (
+from bayesian_predictive_model_averaging.experiments.classification_2d import (
     bayes_error_for_dataset,
     format_error_comparison,
     make_2d_dataset,

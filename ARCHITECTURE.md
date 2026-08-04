@@ -47,7 +47,7 @@ stable softmax over CV scores -> predictions, predictive shares, convergence
 ## Package layout
 
 ```text
-bayesian_model_averaging/
+bayesian_predictive_model_averaging/
   __init__.py          public exports
   base.py              shared sklearn estimator and ensemble engine
   classifier.py        BayesianPredictiveModelAveragingClassifier
@@ -69,7 +69,7 @@ bayesian_model_averaging/
 The public estimators are:
 
 ```python
-from bayesian_model_averaging import (
+from bayesian_predictive_model_averaging import (
     BayesianPredictiveModelAveragingClassifier,
     BayesianPredictiveModelAveragingRegressor,
 )
@@ -517,7 +517,7 @@ Run the development checks with:
 
 ```bash
 python -m pytest
-ruff check bayesian_model_averaging tests
+ruff check bayesian_predictive_model_averaging tests
 ```
 
 The architecture is considered healthy when a custom adapter can be registered

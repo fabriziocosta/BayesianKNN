@@ -3,13 +3,13 @@ import json
 import numpy as np
 from sklearn.base import BaseEstimator
 
-from bayesian_model_averaging import (
+from bayesian_predictive_model_averaging import (
     BayesianPredictiveModelAveragingClassifier,
     FamilyRegistration,
     KNNAdapter,
 )
-from bayesian_model_averaging.models import ModelDraw, recompute_importance_weights
-from bayesian_model_averaging.priors import ParameterDraw
+from bayesian_predictive_model_averaging.models import ModelDraw, recompute_importance_weights
+from bayesian_predictive_model_averaging.priors import ParameterDraw
 
 
 def make_draw(
