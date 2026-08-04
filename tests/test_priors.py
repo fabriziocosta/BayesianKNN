@@ -5,6 +5,7 @@ from bayesian_predictive_model_averaging import (
     CategoricalPrior,
     GaussianCovariancePrior,
     IntegerChoicePrior,
+    LogisticLogScalePrior,
     LogisticScalePrior,
     LogUniformPrior,
     SimplicityCategoricalPrior,
@@ -70,6 +71,28 @@ def test_empirical_frequency_matches_the_beta_cutoff_marginal():
 def test_scale_prior_accepts_a_logistic_configuration_mapping():
     prior = make_scale_prior({"family": "logistic", "beta_shape": 2.0, "beta_scale": 1.0})
     assert isinstance(prior, LogisticScalePrior)
+
+
+def test_logistic_log_scale_prior_sweeps_geometric_grid_with_lower_preference():
+    prior = LogisticLogScalePrior(low=1e-2, high=1e2, n_values=5)
+    assert np.allclose(prior.values, [1e-2, 1e-1, 1.0, 1e1, 1e2])
+
+    draw = prior.draw(np.random.default_rng(14))
+    probabilities = np.asarray(draw.probabilities)
+    assert draw.value in prior.values
+    assert draw.values == prior.values
+    assert np.isclose(probabilities.sum(), 1.0)
+    assert np.all(probabilities > 0)
+    assert np.all(np.diff(probabilities) <= 0)
+
+
+def test_logistic_log_scale_prior_is_reproducible_and_validates_range():
+    prior = LogisticLogScalePrior(low=1e-2, high=1e2, n_values=9, beta_shape=3.0)
+    assert prior.draw(np.random.default_rng(10)) == prior.draw(np.random.default_rng(10))
+    with pytest.raises(ValueError):
+        LogisticLogScalePrior(low=0.0)
+    with pytest.raises(ValueError):
+        LogisticLogScalePrior(n_values=1)
 
 
 def test_gaussian_covariance_prior_is_normalized_monotone_and_reproducible():

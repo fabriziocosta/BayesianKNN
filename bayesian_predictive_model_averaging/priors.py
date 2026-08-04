@@ -134,13 +134,14 @@ class LogUniformPrior:
 class ScalePriorDraw:
     """One draw from a discrete ordered-scale prior."""
 
-    value: int
+    value: int | float
     index: int
     beta: float
     cutoff: float
     probability: float
     log_probability: float
     probabilities: tuple[float, ...]
+    values: tuple[int | float, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -172,39 +173,126 @@ class LogisticScalePrior:
     def draw(self, values: Sequence[int], rng: np.random.Generator) -> ScalePriorDraw:
         """Draw one value and retain the full conditional distribution."""
 
-        try:
-            value_list = list(values)
-        except TypeError as exc:
-            raise ValueError("values must be a one-dimensional ordered sequence") from exc
-        if not value_list:
-            raise ValueError("values must be non-empty")
-        if any(isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer))
-               for value in value_list):
-            raise ValueError("values must contain integers")
-        if any(left >= right for left, right in zip(value_list, value_list[1:])):
-            raise ValueError("values must be strictly increasing")
+        return _draw_logistic_scale(
+            values,
+            rng,
+            beta_shape=self.beta_shape,
+            beta_scale=self.beta_scale,
+            integer_values=True,
+        )
 
-        beta = float(rng.gamma(shape=self.beta_shape, scale=self.beta_scale))
-        cutoff = float(rng.uniform(0.0, 1.0))
-        n_values = len(value_list)
-        positions = np.zeros(1, dtype=float) if n_values == 1 else np.linspace(0.0, 1.0, n_values)
-        log_weights = -np.logaddexp(0.0, beta * (positions - cutoff))
-        log_probabilities = log_weights - logsumexp(log_weights)
-        probabilities = np.exp(log_probabilities)
-        tiny = np.finfo(float).tiny
-        probabilities = np.maximum(probabilities, tiny)
-        probabilities /= probabilities.sum()
 
-        index = int(rng.choice(n_values, p=probabilities))
-        probability = float(probabilities[index])
-        return ScalePriorDraw(
-            value=int(value_list[index]),
-            index=index,
-            beta=beta,
-            cutoff=cutoff,
-            probability=probability,
-            log_probability=float(np.log(probability)),
-            probabilities=tuple(float(probability_) for probability_ in probabilities),
+def _draw_logistic_scale(
+    values: Sequence[int | float],
+    rng: np.random.Generator,
+    *,
+    beta_shape: float,
+    beta_scale: float,
+    integer_values: bool,
+) -> ScalePriorDraw:
+    """Draw from the sigmoid prior over an ordered finite scale grid."""
+
+    try:
+        value_list = list(values)
+    except TypeError as exc:
+        raise ValueError("values must be a one-dimensional ordered sequence") from exc
+    if not value_list:
+        raise ValueError("values must be non-empty")
+    if integer_values and any(
+        isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer))
+        for value in value_list
+    ):
+        raise ValueError("values must contain integers")
+    if not integer_values and any(isinstance(value, (bool, np.bool_)) for value in value_list):
+        raise ValueError("values must contain finite numbers")
+    try:
+        numeric_values = np.asarray(value_list, dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("values must contain finite numbers") from exc
+    if numeric_values.ndim != 1 or np.any(~np.isfinite(numeric_values)):
+        raise ValueError("values must contain finite numbers")
+    if any(left >= right for left, right in zip(numeric_values, numeric_values[1:])):
+        raise ValueError("values must be strictly increasing")
+
+    beta = float(rng.gamma(shape=beta_shape, scale=beta_scale))
+    cutoff = float(rng.uniform(0.0, 1.0))
+    n_values = len(value_list)
+    positions = np.zeros(1, dtype=float) if n_values == 1 else np.linspace(0.0, 1.0, n_values)
+    log_weights = -np.logaddexp(0.0, beta * (positions - cutoff))
+    log_probabilities = log_weights - logsumexp(log_weights)
+    probabilities = np.exp(log_probabilities)
+    tiny = np.finfo(float).tiny
+    probabilities = np.maximum(probabilities, tiny)
+    probabilities /= probabilities.sum()
+
+    index = int(rng.choice(n_values, p=probabilities))
+    probability = float(probabilities[index])
+    normalized_values = tuple(
+        int(value) if integer_values else float(value) for value in numeric_values
+    )
+    return ScalePriorDraw(
+        value=normalized_values[index],
+        index=index,
+        beta=beta,
+        cutoff=cutoff,
+        probability=probability,
+        log_probability=float(np.log(probability)),
+        probabilities=tuple(float(probability_) for probability_ in probabilities),
+        values=normalized_values,
+    )
+
+
+class LogisticLogScalePrior:
+    """Sigmoid-preferring prior over a finite logarithmic parameter sweep."""
+
+    def __init__(
+        self,
+        low: float = 1e-2,
+        high: float = 1e2,
+        n_values: int = 5,
+        beta_shape: float = 2.0,
+        beta_scale: float = 1.0,
+    ) -> None:
+        if not np.isfinite(low) or not np.isfinite(high) or low <= 0 or high <= low:
+            raise ValueError("low and high must be finite, positive, and low < high")
+        if isinstance(n_values, (bool, np.bool_)) or not isinstance(n_values, (int, np.integer)):
+            raise ValueError("n_values must be an integer")
+        if n_values < 2:
+            raise ValueError("n_values must be at least 2")
+        if not np.isfinite(beta_shape) or beta_shape <= 0:
+            raise ValueError("beta_shape must be finite and positive")
+        if not np.isfinite(beta_scale) or beta_scale <= 0:
+            raise ValueError("beta_scale must be finite and positive")
+        self.low = float(low)
+        self.high = float(high)
+        self.n_values = int(n_values)
+        self.beta_shape = float(beta_shape)
+        self.beta_scale = float(beta_scale)
+
+    @property
+    def values(self) -> tuple[float, ...]:
+        """Return the inclusive geometric sweep grid."""
+
+        return tuple(float(value) for value in np.geomspace(self.low, self.high, self.n_values))
+
+    def get_params(self, deep: bool = True) -> dict[str, float | int]:
+        return {
+            "low": self.low,
+            "high": self.high,
+            "n_values": self.n_values,
+            "beta_shape": self.beta_shape,
+            "beta_scale": self.beta_scale,
+        }
+
+    def draw(self, rng: np.random.Generator) -> ScalePriorDraw:
+        """Draw one grid value using the sigmoid prior over log positions."""
+
+        return _draw_logistic_scale(
+            self.values,
+            rng,
+            beta_shape=self.beta_shape,
+            beta_scale=self.beta_scale,
+            integer_values=False,
         )
 
 

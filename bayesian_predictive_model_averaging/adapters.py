@@ -22,6 +22,7 @@ from .model_families import (
 from .priors import (
     CategoricalPrior,
     GaussianCovariancePrior,
+    LogisticLogScalePrior,
     LogUniformPrior,
     ParameterDraw,
     ScalePriorDraw,
@@ -97,6 +98,7 @@ def _scale_draw_metadata(draw: ScalePriorDraw) -> dict[str, Any]:
         "probability": draw.probability,
         "log_probability": draw.log_probability,
         "probabilities": tuple(draw.probabilities),
+        "values": tuple(draw.values),
     }
 
 
@@ -380,6 +382,7 @@ class _RecursivePartitionSVCAdapter(BaseEstimator):
         coef0: float = 0.0,
         gamma: str | float = "scale",
         c_values: Sequence[float] = (0.01, 0.1, 1.0, 10.0, 100.0),
+        c_prior: LogisticLogScalePrior | None = None,
         simplicity: float = 1.0,
         class_weight: str | dict[Any, float] | None = "balanced",
         probability_mode: str = "leaf_frequency",
@@ -393,6 +396,7 @@ class _RecursivePartitionSVCAdapter(BaseEstimator):
         self.coef0 = coef0
         self.gamma = gamma
         self.c_values = tuple(c_values)
+        self.c_prior = c_prior
         self.simplicity = simplicity
         self.class_weight = class_weight
         self.probability_mode = probability_mode
@@ -409,7 +413,7 @@ class _RecursivePartitionSVCAdapter(BaseEstimator):
         if context.task != "classification":
             raise ValueError(f"{self.name} supports classification only")
         c_values = tuple(float(value) for value in self.c_values)
-        if (
+        if self.c_prior is None and (
             not c_values
             or any(not np.isfinite(value) or value <= 0 for value in c_values)
             or len(set(c_values)) != len(c_values)
@@ -418,13 +422,21 @@ class _RecursivePartitionSVCAdapter(BaseEstimator):
         if not np.isfinite(self.simplicity) or self.simplicity <= 0:
             raise ValueError("simplicity must be finite and positive")
 
-        # Lower C means stronger margin regularization and a simpler SVM.
-        c_prior = SimplicityCategoricalPrior(
-            c_values,
-            complexities=c_values,
-            simplicity=float(self.simplicity),
-        )
-        c_value, c_log_probability, c_metadata = c_prior.draw(rng)
+        # Lower C means stronger margin regularization and a simpler SVM. A
+        # LogisticLogScalePrior sweeps a geometric grid while retaining the
+        # same sigmoid preference for lower values.
+        if self.c_prior is None:
+            c_prior = SimplicityCategoricalPrior(
+                c_values,
+                complexities=c_values,
+                simplicity=float(self.simplicity),
+            )
+            c_value, c_log_probability, c_metadata = c_prior.draw(rng)
+        else:
+            c_draw = self.c_prior.draw(rng)
+            c_value = c_draw.value
+            c_log_probability = c_draw.log_probability
+            c_metadata = _scale_draw_metadata(c_draw)
         return ParameterDraw(
             parameters={
                 "C": float(c_value),
@@ -483,6 +495,7 @@ class RecursivePartitionLinearAdapter(_RecursivePartitionSVCAdapter):
     def __init__(
         self,
         c_values: Sequence[float] = (0.01, 0.1, 1.0, 10.0, 100.0),
+        c_prior: LogisticLogScalePrior | None = None,
         simplicity: float = 1.0,
         class_weight: str | dict[Any, float] | None = "balanced",
         probability_mode: str = "leaf_frequency",
@@ -494,6 +507,7 @@ class RecursivePartitionLinearAdapter(_RecursivePartitionSVCAdapter):
         super().__init__(
             "linear",
             c_values=c_values,
+            c_prior=c_prior,
             simplicity=simplicity,
             class_weight=class_weight,
             probability_mode=probability_mode,
@@ -512,6 +526,7 @@ class RecursivePartitionQuadraticAdapter(_RecursivePartitionSVCAdapter):
     def __init__(
         self,
         c_values: Sequence[float] = (0.01, 0.1, 1.0, 10.0, 100.0),
+        c_prior: LogisticLogScalePrior | None = None,
         simplicity: float = 1.0,
         gamma: str | float = "scale",
         class_weight: str | dict[Any, float] | None = "balanced",
@@ -527,6 +542,7 @@ class RecursivePartitionQuadraticAdapter(_RecursivePartitionSVCAdapter):
             coef0=1.0,
             gamma=gamma,
             c_values=c_values,
+            c_prior=c_prior,
             simplicity=simplicity,
             class_weight=class_weight,
             probability_mode=probability_mode,
@@ -545,6 +561,7 @@ class RecursivePartitionRBFAdapter(_RecursivePartitionSVCAdapter):
     def __init__(
         self,
         c_values: Sequence[float] = (0.01, 0.1, 1.0, 10.0, 100.0),
+        c_prior: LogisticLogScalePrior | None = None,
         simplicity: float = 1.0,
         gamma: str | float = "scale",
         class_weight: str | dict[Any, float] | None = "balanced",
@@ -558,6 +575,7 @@ class RecursivePartitionRBFAdapter(_RecursivePartitionSVCAdapter):
             "rbf",
             gamma=gamma,
             c_values=c_values,
+            c_prior=c_prior,
             simplicity=simplicity,
             class_weight=class_weight,
             probability_mode=probability_mode,

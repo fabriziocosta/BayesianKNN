@@ -264,6 +264,31 @@ probability vector in `ScalePriorDraw`.
   full:      n_features * (n_features + 1) / 2
   ```
 
+### Log-scale parameter sweeps
+
+`LogisticLogScalePrior` provides a reusable finite sweep for positive
+parameters. It constructs an inclusive geometric grid and applies the same
+latent sigmoid preference for lower values as `LogisticScalePrior`, but on the
+grid's normalized log positions. For example, the following samples `C` from
+`[1e-2, 1e-1, 1, 1e1, 1e2]`, with lower values favored while every scale remains
+available:
+
+```python
+from bayesian_predictive_model_averaging import (
+    LogisticLogScalePrior,
+    RecursivePartitionRBFAdapter,
+)
+
+adapter = RecursivePartitionRBFAdapter(
+    c_prior=LogisticLogScalePrior(low=1e-2, high=1e2, n_values=5)
+)
+```
+
+The prior records the complete grid and conditional probability vector in the
+parameter-draw metadata. Existing `c_values` configurations remain supported;
+when `c_prior` is supplied for a recursive-partition SVM adapter, it controls
+the `C` sweep and takes precedence over `c_values`.
+
 `MLPAdapter` uses a finite, simplicity-weighted architecture prior rather than
 independently sampling incompatible layer fields. Its joint parameter prior
 covers `hidden_layer_sizes`, activation (including `logistic`), `alpha`, and

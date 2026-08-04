@@ -18,6 +18,7 @@ from bayesian_predictive_model_averaging import (
     KNNAdapter,
     LinearAdapter,
     LinearMixtureAdapter,
+    LogisticLogScalePrior,
     LogisticScalePrior,
     MLPAdapter,
     ParameterDraw,
@@ -111,6 +112,26 @@ def test_recursive_partition_adapters_sample_simple_c_values():
         "classification", {"reg_param": 0.05}, 4
     )
     assert qda.base_estimator.reg_param == pytest.approx(0.05)
+
+
+def test_recursive_partition_adapter_accepts_log_scale_c_sweep():
+    context = SamplingContext(
+        task="classification",
+        n_features=2,
+        n_classes=2,
+        n_samples=30,
+        subset_size=20,
+        min_train_size=15,
+        classes=np.array([0, 1]),
+        scale_prior=None,
+    )
+    prior = LogisticLogScalePrior(low=1e-2, high=1e2, n_values=5)
+    draw = RecursivePartitionLinearAdapter(c_prior=prior).sample_parameters(
+        context, np.random.default_rng(4)
+    )
+    assert draw.parameters["C"] in prior.values
+    assert draw.metadata["C"]["values"] == prior.values
+    assert draw.metadata["C"]["probabilities"][0] >= draw.metadata["C"]["probabilities"][-1]
 
 
 def test_regressor_predicts_and_scores(data):

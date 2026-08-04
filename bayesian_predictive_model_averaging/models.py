@@ -24,6 +24,7 @@ def _scale_draw_dict(draw: ScalePriorDraw | None) -> dict[str, Any] | None:
         "probability": draw.probability,
         "log_probability": draw.log_probability,
         "probabilities": tuple(draw.probabilities),
+        "values": tuple(draw.values),
     }
 
 
