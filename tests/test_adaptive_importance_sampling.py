@@ -4,7 +4,7 @@ import numpy as np
 from sklearn.base import BaseEstimator
 
 from bayesian_model_averaging import (
-    BayesianModelAveragingClassifier,
+    BayesianPredictiveModelAveragingClassifier,
     FamilyRegistration,
     KNNAdapter,
 )
@@ -75,13 +75,13 @@ def test_deterministic_mixture_weight_is_exact():
     np.testing.assert_allclose(draws[0].log_proposal, np.log(0.65 * 0.25))
 
 
-def test_family_proposal_is_defensive_and_adapts_toward_posterior_mass():
+def test_family_proposal_is_defensive_and_adapts_toward_predictive_mass():
     class NamedAdapter(BaseEstimator):
         def __init__(self, name):
             self.name = name
             self.supported_tasks = frozenset({"classification"})
 
-    model = BayesianModelAveragingClassifier(
+    model = BayesianPredictiveModelAveragingClassifier(
         adaptive_importance_sampling=True,
         defensive_prior_weight=0.2,
     )
@@ -101,7 +101,7 @@ def test_adaptive_fit_records_round_diagnostics_and_stops_at_budget():
     rng = np.random.default_rng(12)
     X = rng.normal(size=(24, 3))
     y = np.repeat([0, 1], 12)
-    estimator = BayesianModelAveragingClassifier(
+    estimator = BayesianPredictiveModelAveragingClassifier(
         family_registry=[FamilyRegistration(KNNAdapter(), 1.0)],
         adaptive_importance_sampling=True,
         round_size=2,
@@ -125,7 +125,7 @@ def test_adaptive_fit_records_round_diagnostics_and_stops_at_budget():
 
 
 def test_adaptive_estimator_is_cloneable():
-    estimator = BayesianModelAveragingClassifier(
+    estimator = BayesianPredictiveModelAveragingClassifier(
         adaptive_importance_sampling=True,
         round_size=4,
         max_estimators=8,
@@ -153,8 +153,8 @@ def test_adaptive_fit_is_reproducible_across_parallelism():
         cv=2,
         random_state=8,
     )
-    serial = BayesianModelAveragingClassifier(**common, n_jobs=1).fit(X, y)
-    parallel = BayesianModelAveragingClassifier(**common, n_jobs=2).fit(X, y)
+    serial = BayesianPredictiveModelAveragingClassifier(**common, n_jobs=1).fit(X, y)
+    parallel = BayesianPredictiveModelAveragingClassifier(**common, n_jobs=2).fit(X, y)
     assert np.allclose(serial.predict_proba(X), parallel.predict_proba(X))
     assert serial.round_history_ == parallel.round_history_
     assert [draw["log_importance_weight"] for draw in serial.get_model_draws()] == [

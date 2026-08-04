@@ -16,7 +16,7 @@ from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import SVC
 
-from ..classifier import BayesianModelAveragingClassifier
+from ..classifier import BayesianPredictiveModelAveragingClassifier
 
 DATASET_LOADERS = {
     "iris": load_iris,
@@ -88,8 +88,8 @@ def _make_models(
     if svm_parameters is not None:
         svm_options.update(svm_parameters)
     return {
-        "Bayesian model averaging": make_pipeline(
-            StandardScaler(), BayesianModelAveragingClassifier(**bayesian_options)
+        "BPMA": make_pipeline(
+            StandardScaler(), BayesianPredictiveModelAveragingClassifier(**bayesian_options)
         ),
         "k-NN": make_pipeline(
             StandardScaler(),
@@ -286,7 +286,7 @@ def plot_comparison_results(
     ax.set_xticks(positions, datasets)
     ax.set_ylim(0, max(1.05, 1.08 * upper_bound))
     ax.set_ylabel(metric.replace("_", " ").title())
-    ax.set_title("Bayesian model averaging versus standard classifiers")
+    ax.set_title("BPMA versus standard classifiers")
     ax.grid(axis="y", alpha=0.25)
     ax.legend()
     fig.tight_layout()

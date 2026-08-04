@@ -40,7 +40,7 @@ def _predict_single(model: ModelDraw, X: Any, task: str, classes: np.ndarray | N
     return np.asarray(model.estimator.predict(X), dtype=float)
 
 
-class BayesianModelAveragingBase(BaseEstimator):
+class BayesianPredictiveModelAveragingBase(BaseEstimator):
     """Common Monte Carlo fitting and prediction machinery."""
 
     def __init__(
@@ -167,7 +167,7 @@ class BayesianModelAveragingBase(BaseEstimator):
             ):
                 raise ValueError(f"{name} must be a positive integer")
 
-    def _fit_task(self, X: Any, y: Any, task: str) -> BayesianModelAveragingBase:
+    def _fit_task(self, X: Any, y: Any, task: str) -> BayesianPredictiveModelAveragingBase:
         self._validate_parameters()
         X, y = check_X_y(X, y, accept_sparse=True, ensure_2d=True, y_numeric=task == "regression")
         if task == "regression":
@@ -540,7 +540,7 @@ class BayesianModelAveragingBase(BaseEstimator):
         return [model.to_dict() for model in self._models]
 
     def get_model_masses(self) -> dict[str, Any]:
-        """Return posterior shares by the dynamically registered family names."""
+        """Return normalized predictive shares by registered family name."""
 
         check_is_fitted(self, "_models")
         return aggregate_model_masses(self._models)

@@ -1,4 +1,4 @@
-"""Sampling of complete Bayesian model averaging model configurations."""
+"""Sampling of complete BPMA model configurations."""
 
 from __future__ import annotations
 

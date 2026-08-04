@@ -72,7 +72,7 @@ class ModelDraw:
 
 
 def aggregate_model_masses(draws: Sequence[ModelDraw]) -> dict[str, Any]:
-    """Aggregate posterior shares by family and sampled parameter values.
+    """Aggregate normalized predictive shares by family and sampled parameters.
 
     Parameter shares are conditional within each family, so the values under
     each family/parameter mapping sum to one. This keeps the diagnostic
@@ -83,7 +83,7 @@ def aggregate_model_masses(draws: Sequence[ModelDraw]) -> dict[str, Any]:
         raise ValueError("draws must contain at least one model")
     weights = np.asarray([draw.posterior_weight for draw in draws], dtype=float)
     if np.any(~np.isfinite(weights)) or np.any(weights < 0) or weights.sum() <= 0:
-        raise ValueError("model posterior weights must be finite and non-negative")
+        raise ValueError("model predictive weights must be finite and non-negative")
     weights /= weights.sum()
     family_mass: dict[str, float] = {}
     family_draws: dict[str, list[tuple[ModelDraw, float]]] = {}

@@ -1,26 +1,32 @@
-# Bayesian Model Averaging
+# Bayesian Predictive Model Averaging (BPMA)
 
-Scikit-learn-compatible Bayesian model averaging with pluggable estimator-family
-adapters for classifiers and regressors.
+Scikit-learn-compatible Bayesian Predictive Model Averaging with pluggable
+estimator-family adapters for classifiers and regressors.
+
+**Bayesian Predictive Model Averaging (BPMA)** is a Bayesian-inspired ensemble
+framework in which models are sampled from prior distributions over model
+families and hyperparameters, and weighted according to estimates of their
+predictive evidence obtained through cross-validation, rather than exact
+marginal likelihoods.
 
 ```bash
-python -m pip install bayesian-model-averaging
+python -m pip install bayesian-predictive-model-averaging
 ```
 
 ```python
-from bayesian_model_averaging import BayesianModelAveragingClassifier
+from bayesian_model_averaging import BayesianPredictiveModelAveragingClassifier
 
-model = BayesianModelAveragingClassifier(n_estimators=40, random_state=7)
+model = BayesianPredictiveModelAveragingClassifier(n_estimators=40, random_state=7)
 model.fit(X_train, y_train)
 predictions = model.predict(X_test)
 ```
 
 Available estimators:
 
-- `BayesianModelAveragingClassifier`, including `predict_proba()`
-- `BayesianModelAveragingRegressor`
+- `BayesianPredictiveModelAveragingClassifier`, including `predict_proba()`
+- `BayesianPredictiveModelAveragingRegressor`
 
-The default runtime registry averages k-NN, gated linear-mixture,
+The default BPMA registry averages k-NN, gated linear-mixture,
 Gaussian-mixture, MLP, and decision-tree adapters with uniform family prior
 weights. New scikit-learn estimator families can be registered explicitly with
 a prior weight and an adapter-owned hyperparameter prior without changing the
@@ -51,9 +57,9 @@ is available from your package index.
 For example, use only a configured k-NN family with:
 
 ```python
-from bayesian_model_averaging import BayesianModelAveragingClassifier, FamilyRegistration, KNNAdapter
+from bayesian_model_averaging import BayesianPredictiveModelAveragingClassifier, FamilyRegistration, KNNAdapter
 
-model = BayesianModelAveragingClassifier(
+model = BayesianPredictiveModelAveragingClassifier(
     family_registry=[FamilyRegistration(KNNAdapter(max_neighbors=32), prior_weight=1.0)],
     n_estimators=40,
     random_state=7,
@@ -65,7 +71,7 @@ target prior; later rounds only change computational allocation through a
 defensive proposal, with deterministic-mixture importance correction:
 
 ```python
-model = BayesianModelAveragingClassifier(
+model = BayesianPredictiveModelAveragingClassifier(
     adaptive_importance_sampling=True,
     round_size=50,
     max_estimators=500,
@@ -82,7 +88,8 @@ Adaptive rounds stop when enabled proposal, prediction, and ESS criteria remain
 stable for the configured patience, or when the estimator/round budget is hit.
 The learned proposal is never treated as an updated prior.
 
-The full design and implementation documentation is in [ARCHITECTURE.md](ARCHITECTURE.md).
+The implementation design is in [ARCHITECTURE.md](ARCHITECTURE.md), and the
+methodological overview is in [WHITE_PAPER.md](WHITE_PAPER.md).
 
 For a minimal end-to-end example, see
 [`notebooks/simple_library_usage.ipynb`](notebooks/simple_library_usage.ipynb).

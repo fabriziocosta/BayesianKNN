@@ -1,4 +1,4 @@
-"""Bayesian model-averaging regressor."""
+"""Bayesian Predictive Model Averaging regressor."""
 
 from __future__ import annotations
 
@@ -7,15 +7,17 @@ from typing import Any
 from sklearn.base import RegressorMixin
 from sklearn.metrics import r2_score
 
-from .base import BayesianModelAveragingBase
+from .base import BayesianPredictiveModelAveragingBase
 
 
-class BayesianModelAveragingRegressor(RegressorMixin, BayesianModelAveragingBase):
+class BayesianPredictiveModelAveragingRegressor(
+    RegressorMixin, BayesianPredictiveModelAveragingBase
+):
     """Regressor that averages sampled predictive models over CV scores."""
 
     _estimator_type = "regressor"
 
-    def fit(self, X: Any, y: Any) -> BayesianModelAveragingRegressor:
+    def fit(self, X: Any, y: Any) -> BayesianPredictiveModelAveragingRegressor:
         self._fit_task(X, y, "regression")
         return self
 

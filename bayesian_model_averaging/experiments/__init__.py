@@ -1,4 +1,4 @@
-"""Reproducible experiments for Bayesian model averaging."""
+"""Reproducible experiments for BPMA."""
 
 from .classification_2d import (
     Classification2DResult,

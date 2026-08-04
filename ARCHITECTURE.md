@@ -1,9 +1,16 @@
-# Bayesian Model Averaging Architecture
+# Bayesian Predictive Model Averaging (BPMA) Architecture
 
-This document describes the implemented architecture. The package is a
-scikit-learn-compatible ensemble that samples complete predictive models from
-declared priors, scores them with cross-validation, and averages their
-predictions. It does not optimize one hyperparameter configuration.
+This document describes the implemented BPMA architecture. BPMA is a
+Bayesian-inspired predictive model averaging framework that samples complete
+predictive models from declared priors, estimates predictive evidence with
+cross-validation, and averages their predictions. It does not optimize one
+hyperparameter configuration.
+
+Classical Bayesian Model Averaging uses marginal likelihoods to obtain
+posterior model probabilities. BPMA instead uses cross-validated predictive
+evidence, which makes the framework applicable to arbitrary machine-learning
+estimators whose exact marginal likelihoods are inaccessible or intractable.
+The methodological overview is in [WHITE_PAPER.md](WHITE_PAPER.md).
 
 ## Design
 
@@ -15,7 +22,7 @@ The core integrates three kinds of uncertainty:
 
 Each Monte Carlo draw is a complete, fitted model. The draw records its prior
 and cross-validated score, while the ensemble weight is determined by the
-cross-validated pseudo-likelihood. This keeps the integration engine generic:
+cross-validated predictive evidence. This keeps the BPMA integration engine generic:
 family-specific parameter logic lives in adapters, and scoring only depends on
 the estimator contract.
 
@@ -34,7 +41,7 @@ adapter samples complete parameters
         |
 generic CV score -> fit final estimator -> store ModelDraw
         |
-stable softmax over CV scores -> predictions, posterior shares, convergence
+stable softmax over CV scores -> predictions, predictive shares, convergence
 ```
 
 ## Package layout
@@ -43,13 +50,13 @@ stable softmax over CV scores -> predictions, posterior shares, convergence
 bayesian_model_averaging/
   __init__.py          public exports
   base.py              shared sklearn estimator and ensemble engine
-  classifier.py        BayesianModelAveragingClassifier
-  regressor.py         BayesianModelAveragingRegressor
+  classifier.py        BayesianPredictiveModelAveragingClassifier
+  regressor.py         BayesianPredictiveModelAveragingRegressor
   adapters.py          adapter protocol, registrations, built-in adapters
   priors.py            reusable prior objects and draw records
   sampling.py          complete-model sampling, CV subsets, fitting
   scoring.py           generic classification and regression scoring
-  models.py            ModelDraw and posterior-share diagnostics
+  models.py            ModelDraw and predictive-share diagnostics
   model_families.py    GaussianClassifier implementation
   convergence.py       prediction-change convergence metrics
   utils.py             deterministic seeds and numerical helpers
@@ -63,11 +70,11 @@ The public estimators are:
 
 ```python
 from bayesian_model_averaging import (
-    BayesianModelAveragingClassifier,
-    BayesianModelAveragingRegressor,
+    BayesianPredictiveModelAveragingClassifier,
+    BayesianPredictiveModelAveragingRegressor,
 )
 
-classifier = BayesianModelAveragingClassifier(
+classifier = BayesianPredictiveModelAveragingClassifier(
     n_estimators=40,
     random_state=7,
 )
@@ -75,7 +82,7 @@ classifier.fit(X_train, y_train)
 probabilities = classifier.predict_proba(X_test)
 predictions = classifier.predict(X_test)
 
-regressor = BayesianModelAveragingRegressor(n_estimators=40, random_state=7)
+regressor = BayesianPredictiveModelAveragingRegressor(n_estimators=40, random_state=7)
 regressor.fit(X_train, y_train)
 predictions = regressor.predict(X_test)
 ```
@@ -214,7 +221,7 @@ class ToyAdapter:
     def predictive_concentration(self, task, parameters):
         return 1.0
 
-model = BayesianModelAveragingClassifier(
+model = BayesianPredictiveModelAveragingClassifier(
     family_registry=[FamilyRegistration(ToyAdapter(), prior_weight=1.0)]
 )
 ```
@@ -362,7 +369,7 @@ weighted average of fitted estimator predictions.
 
 ## Weights, prediction, and diagnostics
 
-For ordinary prior sampling, posterior ensemble weights are the stable softmax
+For ordinary prior sampling, normalized predictive weights are the stable softmax
 of CV pseudo-log-likelihoods:
 
 ```text
@@ -377,7 +384,7 @@ better-scoring models; `temperature > 1` spreads mass more evenly.
 Adaptive draws instead use the prior-corrected target/proposal ratio described
 above. Every draw records its generating round, proposal identifier, family
 proposal probability, generating proposal log density, final mixture proposal
-log density, unnormalized importance weight, and normalized posterior weight.
+log density, unnormalized importance weight, and normalized predictive weight.
 
 For classification, predictions are the weighted average of globally aligned
 probability vectors. For regression, predictions are the weighted average of
@@ -408,8 +415,8 @@ Family-specific information belongs inside `parameters` and
 `parameter_prior.metadata`; the core does not require flattened fields such as
 `n_neighbors` or `covariance_structure`.
 
-`get_model_masses()` returns posterior shares by family and parameter. The
-method name is retained for API stability:
+`get_model_masses()` returns normalized predictive shares by family and
+parameter. The method name is retained for API stability:
 
 ```python
 {
@@ -425,7 +432,7 @@ method name is retained for API stability:
 }
 ```
 
-Family posterior shares sum to one. Parameter shares are conditional within each family,
+Family predictive shares sum to one. Parameter shares are conditional within each family,
 which makes diagnostics meaningful even when families have different numbers
 of parameter choices.
 
@@ -445,7 +452,7 @@ Adaptive fits additionally expose `proposal_history_`, `round_history_`,
 `n_rounds_`, `effective_sample_size_`,
 `effective_sample_size_fraction_`, `adaptive_converged_`, and
 `stopping_reason_`. Round history records proposal distance, prediction change,
-ESS, maximum normalized weight, family proposal probabilities, posterior family
+ESS, maximum normalized weight, family proposal probabilities, predictive family
 mass, and the active stopping state. Proposal and prediction stability require
 the configured number of consecutive successful rounds; ESS is diagnostic unless
 an `ess_target_fraction` is configured. Adapter-owned parameter adaptation is

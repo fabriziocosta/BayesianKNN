@@ -9,8 +9,8 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.tree import DecisionTreeClassifier
 
 from bayesian_model_averaging import (
-    BayesianModelAveragingClassifier,
-    BayesianModelAveragingRegressor,
+    BayesianPredictiveModelAveragingClassifier,
+    BayesianPredictiveModelAveragingRegressor,
     DecisionTreeAdapter,
     FamilyRegistration,
     GaussianAdapter,
@@ -58,7 +58,7 @@ def estimator_kwargs(adapter=None):
 
 def test_classifier_predicts_and_stores_complete_draws(data):
     X, y, _ = data
-    estimator = BayesianModelAveragingClassifier(**estimator_kwargs()).fit(X, y)
+    estimator = BayesianPredictiveModelAveragingClassifier(**estimator_kwargs()).fit(X, y)
     probabilities = estimator.predict_proba(X[:5])
     assert probabilities.shape == (5, 3)
     assert np.allclose(probabilities.sum(axis=1), 1.0)
@@ -115,7 +115,7 @@ def test_recursive_partition_adapters_sample_simple_c_values():
 
 def test_regressor_predicts_and_scores(data):
     X, _, y = data
-    estimator = BayesianModelAveragingRegressor(**estimator_kwargs()).fit(X, y)
+    estimator = BayesianPredictiveModelAveragingRegressor(**estimator_kwargs()).fit(X, y)
     prediction = estimator.predict(X[:5])
     assert prediction.shape == (5,)
     assert np.all(np.isfinite(prediction))
@@ -124,7 +124,9 @@ def test_regressor_predicts_and_scores(data):
 
 def test_classifier_accepts_csr_inputs(data):
     X, y, _ = data
-    estimator = BayesianModelAveragingClassifier(**estimator_kwargs()).fit(csr_matrix(X), y)
+    estimator = BayesianPredictiveModelAveragingClassifier(**estimator_kwargs()).fit(
+        csr_matrix(X), y
+    )
     probabilities = estimator.predict_proba(csr_matrix(X[:5]))
     assert probabilities.shape == (5, 3)
     assert np.allclose(probabilities.sum(axis=1), 1.0)
@@ -132,7 +134,9 @@ def test_classifier_accepts_csr_inputs(data):
 
 def test_regressor_accepts_csr_inputs(data):
     X, _, y = data
-    estimator = BayesianModelAveragingRegressor(**estimator_kwargs()).fit(csr_matrix(X), y)
+    estimator = BayesianPredictiveModelAveragingRegressor(**estimator_kwargs()).fit(
+        csr_matrix(X), y
+    )
     prediction = estimator.predict(csr_matrix(X[:5]))
     assert prediction.shape == (5,)
     assert np.all(np.isfinite(prediction))
@@ -140,7 +144,7 @@ def test_regressor_accepts_csr_inputs(data):
 
 def test_gaussian_adapter_integrates_covariance_structures(data):
     X, y, _ = data
-    estimator = BayesianModelAveragingClassifier(
+    estimator = BayesianPredictiveModelAveragingClassifier(
         **{
             **estimator_kwargs(GaussianAdapter()),
             "n_estimators": 20,
@@ -157,7 +161,7 @@ def test_gaussian_adapter_integrates_covariance_structures(data):
 
 def test_gaussian_mixture_adapter_samples_components_and_covariance(data):
     X, y, _ = data
-    estimator = BayesianModelAveragingClassifier(
+    estimator = BayesianPredictiveModelAveragingClassifier(
         **{
             **estimator_kwargs(GaussianMixtureAdapter(max_components=4)),
             "n_estimators": 12,
@@ -178,9 +182,9 @@ def test_gaussian_mixture_adapter_samples_components_and_covariance(data):
 def test_linear_adapter_is_valid_for_both_tasks(data, task):
     X, y_class, y_reg = data
     estimator_class = (
-        BayesianModelAveragingClassifier
+        BayesianPredictiveModelAveragingClassifier
         if task == "classification"
-        else BayesianModelAveragingRegressor
+        else BayesianPredictiveModelAveragingRegressor
     )
     estimator = estimator_class(
         **{**estimator_kwargs(LinearAdapter()), "n_estimators": 2}
@@ -190,7 +194,7 @@ def test_linear_adapter_is_valid_for_both_tasks(data, task):
 
 def test_default_registry_contains_built_in_families(data):
     X, y, _ = data
-    estimator = BayesianModelAveragingClassifier(
+    estimator = BayesianPredictiveModelAveragingClassifier(
         min_subset_size=9,
         max_subset_size=18,
         cv=3,
@@ -219,7 +223,7 @@ def test_default_registry_contains_built_in_families(data):
 
 def test_explicit_family_weights_are_normalized(data):
     X, y, _ = data
-    estimator = BayesianModelAveragingClassifier(
+    estimator = BayesianPredictiveModelAveragingClassifier(
         **{
             **estimator_kwargs(LinearAdapter()),
             "family_registry": [
@@ -238,7 +242,7 @@ def test_explicit_family_weights_are_normalized(data):
 
 def test_mlp_adapter_samples_structured_parameters(data):
     X, y, _ = data
-    estimator = BayesianModelAveragingClassifier(
+    estimator = BayesianPredictiveModelAveragingClassifier(
         **{**estimator_kwargs(MLPAdapter()), "n_estimators": 3}
     ).fit(X, y)
     draws = estimator.get_model_draws()
@@ -250,7 +254,7 @@ def test_mlp_adapter_samples_structured_parameters(data):
 
 def test_linear_mixture_adapter_supports_classification_and_regression(data):
     X, y, y_reg = data
-    classifier = BayesianModelAveragingClassifier(
+    classifier = BayesianPredictiveModelAveragingClassifier(
         **{
             **estimator_kwargs(LinearMixtureAdapter(max_experts=3)),
             "n_estimators": 2,
@@ -261,7 +265,7 @@ def test_linear_mixture_adapter_supports_classification_and_regression(data):
     assert all(1 <= draw["parameters"]["n_experts"] <= 3 for draw in classifier_draws)
     assert classifier.predict_proba(X[:3]).shape == (3, 3)
 
-    regressor = BayesianModelAveragingRegressor(
+    regressor = BayesianPredictiveModelAveragingRegressor(
         **{
             **estimator_kwargs(LinearMixtureAdapter(max_experts=3)),
             "n_estimators": 2,
@@ -272,7 +276,7 @@ def test_linear_mixture_adapter_supports_classification_and_regression(data):
 
 def test_mlp_adapter_supports_regression(data):
     X, _, y = data
-    estimator = BayesianModelAveragingRegressor(
+    estimator = BayesianPredictiveModelAveragingRegressor(
         **{**estimator_kwargs(MLPAdapter()), "n_estimators": 1}
     ).fit(X, y)
     assert estimator.predict(X[:3]).shape == (3,)
@@ -280,7 +284,7 @@ def test_mlp_adapter_supports_regression(data):
 
 def test_decision_tree_adapter_supports_classification_and_regression(data):
     X, y, y_reg = data
-    classifier = BayesianModelAveragingClassifier(
+    classifier = BayesianPredictiveModelAveragingClassifier(
         **{**estimator_kwargs(DecisionTreeAdapter()), "n_estimators": 3}
     ).fit(X, y)
     classifier_draws = classifier.get_model_draws()
@@ -291,7 +295,7 @@ def test_decision_tree_adapter_supports_classification_and_regression(data):
     )
     assert classifier.predict_proba(X[:3]).shape == (3, 3)
 
-    regressor = BayesianModelAveragingRegressor(
+    regressor = BayesianPredictiveModelAveragingRegressor(
         **{**estimator_kwargs(DecisionTreeAdapter()), "n_estimators": 3}
     ).fit(X, y_reg)
     regression_draws = regressor.get_model_draws()
@@ -342,7 +346,7 @@ class ToyRegressorAdapter(BaseEstimator):
 
 def test_custom_classifier_adapter_registers_without_core_changes(data):
     X, y, _ = data
-    estimator = BayesianModelAveragingClassifier(
+    estimator = BayesianPredictiveModelAveragingClassifier(
         **{**estimator_kwargs(ToyClassifierAdapter()), "n_estimators": 2}
     ).fit(X, y)
     assert {draw["family_name"] for draw in estimator.get_model_draws()} == {"toy"}
@@ -351,7 +355,7 @@ def test_custom_classifier_adapter_registers_without_core_changes(data):
 
 def test_custom_regressor_adapter_registers_without_core_changes(data):
     X, _, y = data
-    estimator = BayesianModelAveragingRegressor(
+    estimator = BayesianPredictiveModelAveragingRegressor(
         **{**estimator_kwargs(ToyRegressorAdapter()), "n_estimators": 2}
     ).fit(X, y)
     assert {draw["family_name"] for draw in estimator.get_model_draws()} == {"toy-regressor"}
@@ -361,7 +365,7 @@ def test_custom_regressor_adapter_registers_without_core_changes(data):
 def test_adapter_validation_rejects_wrong_task(data):
     X, y, _ = data
     with pytest.raises(ValueError, match="no registered adapter supports task"):
-        BayesianModelAveragingRegressor(
+        BayesianPredictiveModelAveragingRegressor(
             **{**estimator_kwargs(ToyClassifierAdapter()), "n_estimators": 1}
         ).fit(X, y)
 
@@ -372,8 +376,8 @@ def test_temperature_concentrates_mass_on_higher_scoring_models(data):
         **estimator_kwargs(),
         "n_estimators": 20,
     }
-    ordinary = BayesianModelAveragingClassifier(**common).fit(X, y)
-    sharp = BayesianModelAveragingClassifier(**{**common, "temperature": 0.25}).fit(X, y)
+    ordinary = BayesianPredictiveModelAveragingClassifier(**common).fit(X, y)
+    sharp = BayesianPredictiveModelAveragingClassifier(**{**common, "temperature": 0.25}).fit(X, y)
     ordinary_draws = ordinary.get_model_draws()
     sharp_draws = sharp.get_model_draws()
     ordinary_scores = np.asarray([draw["log_importance_weight"] for draw in ordinary_draws])
@@ -388,8 +392,8 @@ def test_temperature_concentrates_mass_on_higher_scoring_models(data):
 
 def test_parallel_and_serial_draws_are_reproducible(data):
     X, y, _ = data
-    serial = BayesianModelAveragingClassifier(**estimator_kwargs()).fit(X, y)
-    parallel = BayesianModelAveragingClassifier(
+    serial = BayesianPredictiveModelAveragingClassifier(**estimator_kwargs()).fit(X, y)
+    parallel = BayesianPredictiveModelAveragingClassifier(
         **{**estimator_kwargs(), "n_jobs": 2}
     ).fit(X, y)
     assert np.allclose(serial.predict_proba(X), parallel.predict_proba(X))
@@ -400,7 +404,7 @@ def test_parallel_and_serial_draws_are_reproducible(data):
 
 def test_auto_convergence_respects_max_estimators(data):
     X, y, _ = data
-    estimator = BayesianModelAveragingClassifier(
+    estimator = BayesianPredictiveModelAveragingClassifier(
         **{**estimator_kwargs(), "n_estimators": "auto", "max_estimators": 2}
     ).fit(X, y)
     assert estimator.n_estimators_ == 2
@@ -409,18 +413,18 @@ def test_auto_convergence_respects_max_estimators(data):
 
 def test_estimator_is_cloneable_and_works_in_grid_search(data):
     X, y, _ = data
-    estimator = BayesianModelAveragingClassifier(**estimator_kwargs())
+    estimator = BayesianPredictiveModelAveragingClassifier(**estimator_kwargs())
     cloned = clone(estimator)
     assert cloned.get_params()["family_registry"][0].adapter.name == "knn"
     search = GridSearchCV(
         make_pipeline(
             StandardScaler(),
-            BayesianModelAveragingClassifier(
+            BayesianPredictiveModelAveragingClassifier(
                 **{**estimator_kwargs(), "max_subset_size": 12}
             ),
         ),
         {
-            "bayesianmodelaveragingclassifier__family_registry": [
+            "bayesianpredictivemodelaveragingclassifier__family_registry": [
                 registration(KNNAdapter(max_neighbors=1)),
                 registration(KNNAdapter(max_neighbors=2)),
             ]
@@ -445,7 +449,7 @@ def test_one_prior_instance_drives_subset_and_knn_draws(data):
             return self.delegate.draw(values, rng)
 
     prior = CountingPrior()
-    BayesianModelAveragingClassifier(
+    BayesianPredictiveModelAveragingClassifier(
         **{**estimator_kwargs(), "scale_prior": prior, "n_jobs": 1, "n_estimators": 1}
     ).fit(X, y)
     assert prior.calls == 2

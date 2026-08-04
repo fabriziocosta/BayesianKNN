@@ -1,4 +1,4 @@
-"""Bayesian model averaging with runtime estimator-family adapters."""
+"""BPMA with runtime estimator-family adapters."""
 
 from .adapters import (
     DecisionTreeAdapter,
@@ -17,7 +17,7 @@ from .adapters import (
     SamplingContext,
     default_family_registry,
 )
-from .classifier import BayesianModelAveragingClassifier
+from .classifier import BayesianPredictiveModelAveragingClassifier
 from .priors import (
     CategoricalPrior,
     GaussianCovarianceDraw,
@@ -29,11 +29,11 @@ from .priors import (
     ScalePriorDraw,
     SimplicityCategoricalPrior,
 )
-from .regressor import BayesianModelAveragingRegressor
+from .regressor import BayesianPredictiveModelAveragingRegressor
 
 __all__ = [
-    "BayesianModelAveragingClassifier",
-    "BayesianModelAveragingRegressor",
+    "BayesianPredictiveModelAveragingClassifier",
+    "BayesianPredictiveModelAveragingRegressor",
     "CategoricalPrior",
     "DecisionTreeAdapter",
     "EstimatorFamilyAdapter",

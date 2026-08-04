@@ -20,7 +20,7 @@ from sklearn.datasets import (
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 
-from ..classifier import BayesianModelAveragingClassifier
+from ..classifier import BayesianPredictiveModelAveragingClassifier
 
 DEFAULT_MODEL_PARAMETERS: dict[str, Any] = {
     "n_estimators": "auto",
@@ -71,7 +71,7 @@ class Classification2DResult:
     X_test: np.ndarray
     y_train: np.ndarray
     y_test: np.ndarray
-    model: BayesianModelAveragingClassifier
+    model: BayesianPredictiveModelAveragingClassifier
     y_pred: np.ndarray
     test_accuracy: float
     model_weights: np.ndarray
@@ -89,7 +89,7 @@ class Classification2DResult:
 
     @property
     def model_masses(self) -> dict[str, Any]:
-        """Return posterior shares by model family and family-specific choice."""
+        """Return normalized predictive shares by family and family-specific choice."""
 
         return self.model.get_model_masses()
 
@@ -407,8 +407,8 @@ def _gaussian_bayes_error_estimate(
             for class_label in np.unique(component_labels)
         ]
     )
-    posterior = np.exp(class_log_probabilities - log_total[:, None])
-    return float(1.0 - np.mean(np.max(posterior, axis=1)))
+    probabilities = np.exp(class_log_probabilities - log_total[:, None])
+    return float(1.0 - np.mean(np.max(probabilities, axis=1)))
 
 
 def _curve_oracle_error(
@@ -586,7 +586,7 @@ def run_2d_classification_experiment(
     model_options = dict(DEFAULT_MODEL_PARAMETERS)
     if model_parameters is not None:
         model_options.update(model_parameters)
-    model = BayesianModelAveragingClassifier(**model_options)
+    model = BayesianPredictiveModelAveragingClassifier(**model_options)
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
     model_weights = np.asarray(
@@ -648,7 +648,7 @@ def format_family_parameter_shares(
     *,
     max_items: int | None = None,
 ) -> str:
-    """Format conditional posterior shares for one sampled parameter."""
+    """Format conditional predictive shares for one sampled parameter."""
 
     values = result.model_masses["parameter"].get(family_name, {}).get(parameter_name, {})
     if not values:
@@ -803,7 +803,7 @@ def plot_probability_heatmap(
         ax.set_aspect("equal", adjustable="box")
         ax.legend(loc="upper right")
         fig.suptitle(
-            f"Bayesian model averaging on {result.dataset}\n"
+            f"BPMA on {result.dataset}\n"
             f"{result.model.n_estimators_} estimators, test accuracy = {result.test_accuracy:.3f}"
         )
         fig.tight_layout(rect=(0, 0, 1, 0.94))
@@ -866,7 +866,7 @@ def plot_probability_heatmap(
         ax.set_aspect("equal", adjustable="box")
         ax.legend(loc="upper right")
     fig.suptitle(
-        f"Bayesian model averaging on {result.dataset}\n"
+        f"BPMA on {result.dataset}\n"
         f"{result.model.n_estimators_} estimators, test accuracy = {result.test_accuracy:.3f}"
     )
     fig.tight_layout(rect=(0, 0, 1, 0.94))
