@@ -36,6 +36,9 @@ class PreparedModel:
     family_name: str
     family_adapter: EstimatorFamilyAdapter
     family_prior_probability: float
+    family_proposal_probability: float
+    round_index: int
+    proposal_id: str
     parameters: dict[str, Any]
     parameter_prior: ParameterDraw
     subset_size: int
@@ -172,12 +175,31 @@ def prepare_model(
     epsilon: float,
     seed: int,
     classes: np.ndarray | None,
+    family_proposal_probabilities: Sequence[float] | None = None,
+    round_index: int = 0,
+    proposal_id: str = "prior-0",
 ) -> PreparedModel:
     rng = np.random.default_rng(seed)
+    prior_probabilities = np.asarray(
+        [registration.prior_weight for registration in family_registry], dtype=float
+    )
+    proposal_probabilities = (
+        prior_probabilities
+        if family_proposal_probabilities is None
+        else np.asarray(family_proposal_probabilities, dtype=float)
+    )
+    if proposal_probabilities.shape != prior_probabilities.shape:
+        raise ValueError("family proposal probabilities must match the family registry")
+    if (
+        np.any(~np.isfinite(proposal_probabilities))
+        or np.any(proposal_probabilities <= 0)
+        or not np.isclose(proposal_probabilities.sum(), 1.0)
+    ):
+        raise ValueError("family proposal probabilities must be finite, positive, and normalized")
     family_index = int(
         rng.choice(
             len(family_registry),
-            p=np.asarray([registration.prior_weight for registration in family_registry]),
+            p=proposal_probabilities,
         )
     )
     registration = family_registry[family_index]
@@ -236,6 +258,9 @@ def prepare_model(
         family_name=family_name,
         family_adapter=family_adapter,
         family_prior_probability=registration.prior_weight,
+        family_proposal_probability=float(proposal_probabilities[family_index]),
+        round_index=int(round_index),
+        proposal_id=str(proposal_id),
         parameters=dict(parameter_prior.parameters),
         parameter_prior=parameter_prior,
         subset_size=subset_draw.value,
@@ -297,18 +322,27 @@ def fit_prepared_model(prepared: PreparedModel, cv_score: float) -> ModelDraw:
         + prepared.subset_log_probability
         + prepared.parameter_prior.log_probability
     )
+    log_proposal = (
+        log_prior
+        - np.log(prepared.family_prior_probability)
+        + np.log(prepared.family_proposal_probability)
+    )
     return ModelDraw(
         family_name=prepared.family_name,
         family_prior_probability=prepared.family_prior_probability,
+        family_proposal_probability=prepared.family_proposal_probability,
+        round_index=prepared.round_index,
+        proposal_id=prepared.proposal_id,
         parameters=prepared.parameters,
         parameter_prior=prepared.parameter_prior,
         subset_size=prepared.subset_size,
         subset_indices=prepared.subset_indices,
         subset_scale_draw=prepared.subset_scale_draw,
         log_prior=float(log_prior),
-        log_proposal=float(log_prior),
+        log_proposal=float(log_proposal),
         cv_log_pseudo_likelihood=float(cv_score),
         estimator=estimator,
+        generating_log_proposal=float(log_proposal),
     )
 
 

@@ -94,8 +94,16 @@ Important constructor parameters are:
 - `tolerance`, `convergence_metric`, and `convergence_size`;
 - `alpha` for classification probability smoothing;
 - `epsilon` for the regression variance floor;
-- `temperature` for ensemble-weight concentration;
+- `temperature` for target pseudo-posterior concentration;
 - `n_jobs` and `random_state`.
+
+Adaptive importance sampling is disabled by default. When enabled, the main
+controls are `round_size`, `min_rounds`, `max_rounds`,
+`defensive_prior_weight`, `proposal_tolerance`, optional
+`prediction_tolerance`, optional `ess_target_fraction`, `stopping_patience`,
+and `adaptation_temperature`. In adaptive mode `max_estimators` is the total
+draw budget; `n_estimators` retains its existing meaning when adaptation is
+disabled.
 
 ## Runtime family adapters
 
@@ -256,8 +264,8 @@ covers `hidden_layer_sizes`, activation (including `logistic`), `alpha`, and
 
 ## Sampling a complete model
 
-`sampling.py` performs the following sequence for every deterministic child
-seed:
+With ordinary sampling, `sampling.py` performs the following sequence for every
+deterministic child seed:
 
 1. select a registered family using normalized family weights;
 2. validate the selected task;
@@ -286,6 +294,36 @@ log_prior =
 
 `log_proposal` is equal to `log_prior` because the current sampler proposes
 directly from the declared prior.
+
+## Adaptive importance sampling
+
+Adaptive sampling preserves the declared prior as the target distribution. The
+first round samples from the prior. Later rounds adapt only estimator-family
+probabilities; subset sizes and adapter parameters continue to use their
+declared conditional priors. For family `f`:
+
+```text
+q_t(f) = epsilon * p(f) + (1 - epsilon) * qhat_t(f)
+```
+
+where `qhat_t(f)` is the weighted family mass from earlier draws and `epsilon`
+is `defensive_prior_weight`. This defensive mixture keeps every prior-supported
+family reachable. `adaptation_temperature` broadens or concentrates `qhat`;
+it does not change the target temperature.
+
+All rounds are pooled with a deterministic-mixture proposal. If `alpha_t` is
+the fraction of draws generated in round `t`, then:
+
+```text
+q_mix(theta) = sum_t alpha_t * q_t(theta)
+log_target(theta) = log_prior(theta) + score(theta) / temperature
+log_importance_weight(theta) = log_target(theta) - log(q_mix(theta))
+```
+
+When adaptation is disabled, the proposal equals the prior and weights reduce
+to the existing score-only softmax. The learned proposal is a computational
+allocation mechanism, not an updated prior, and improves Monte Carlo
+efficiency rather than reducing uncertainty from finite data.
 
 ## Generic scoring
 
@@ -336,6 +374,11 @@ The recorded prior is not multiplied into the weight a second time. Sampling
 frequency already represents the prior. `temperature < 1` concentrates mass on
 better-scoring models; `temperature > 1` spreads mass more evenly.
 
+Adaptive draws instead use the prior-corrected target/proposal ratio described
+above. Every draw records its generating round, proposal identifier, family
+proposal probability, generating proposal log density, final mixture proposal
+log density, unnormalized importance weight, and normalized posterior weight.
+
 For classification, predictions are the weighted average of globally aligned
 probability vectors. For regression, predictions are the weighted average of
 model predictions.
@@ -345,6 +388,9 @@ model predictions.
 ```text
 family_name
 family_prior_probability
+round_index
+proposal_id
+family_proposal_probability
 parameters
 parameter_prior
 subset_size
@@ -352,6 +398,7 @@ subset_indices
 subset_scale_draw
 log_prior
 log_proposal
+generating_log_proposal
 cv_log_pseudo_likelihood
 log_importance_weight
 posterior_weight
@@ -393,6 +440,17 @@ metric is maximum, mean, or median absolute change. The estimator stores:
 - `n_estimators_`;
 - `converged_`;
 - `convergence_subset_indices_`.
+
+Adaptive fits additionally expose `proposal_history_`, `round_history_`,
+`n_rounds_`, `effective_sample_size_`,
+`effective_sample_size_fraction_`, `adaptive_converged_`, and
+`stopping_reason_`. Round history records proposal distance, prediction change,
+ESS, maximum normalized weight, family proposal probabilities, posterior family
+mass, and the active stopping state. Proposal and prediction stability require
+the configured number of consecutive successful rounds; ESS is diagnostic unless
+an `ess_target_fraction` is configured. Adapter-owned parameter adaptation is
+reserved for a future extension; the initial implementation adapts families
+only.
 
 Every draw receives a deterministic child seed derived from the base seed and
 draw index. This makes serial and parallel fits reproducible and allows

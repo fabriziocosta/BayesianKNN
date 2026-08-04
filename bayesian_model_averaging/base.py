@@ -17,7 +17,7 @@ from .adapters import (
     normalize_family_registry,
 )
 from .convergence import compare_predictions, convergence_difference
-from .models import ModelDraw, aggregate_model_masses
+from .models import ModelDraw, aggregate_model_masses, recompute_importance_weights
 from .priors import LogisticScalePrior, make_scale_prior
 from .sampling import (
     feasible_subset_sizes,
@@ -60,6 +60,16 @@ class BayesianModelAveragingBase(BaseEstimator):
         temperature: float = 1.0,
         n_jobs: int | None = -1,
         random_state: Any = None,
+        adaptive_importance_sampling: bool = False,
+        round_size: int = 50,
+        min_rounds: int = 2,
+        max_rounds: int | None = None,
+        defensive_prior_weight: float = 0.2,
+        proposal_tolerance: float = 1e-3,
+        prediction_tolerance: float | None = None,
+        ess_target_fraction: float | None = None,
+        stopping_patience: int = 2,
+        adaptation_temperature: float = 1.0,
     ) -> None:
         self.family_registry = family_registry
         self.scale_prior = scale_prior
@@ -76,8 +86,20 @@ class BayesianModelAveragingBase(BaseEstimator):
         self.temperature = temperature
         self.n_jobs = n_jobs
         self.random_state = random_state
+        self.adaptive_importance_sampling = adaptive_importance_sampling
+        self.round_size = round_size
+        self.min_rounds = min_rounds
+        self.max_rounds = max_rounds
+        self.defensive_prior_weight = defensive_prior_weight
+        self.proposal_tolerance = proposal_tolerance
+        self.prediction_tolerance = prediction_tolerance
+        self.ess_target_fraction = ess_target_fraction
+        self.stopping_patience = stopping_patience
+        self.adaptation_temperature = adaptation_temperature
 
     def _validate_parameters(self) -> None:
+        if not isinstance(self.adaptive_importance_sampling, (bool, np.bool_)):
+            raise ValueError("adaptive_importance_sampling must be boolean")
         if self.n_estimators != "auto" and (
             isinstance(self.n_estimators, bool)
             or not isinstance(self.n_estimators, (int, np.integer))
@@ -102,6 +124,38 @@ class BayesianModelAveragingBase(BaseEstimator):
             raise ValueError("epsilon must be finite and positive")
         if not np.isfinite(self.temperature) or self.temperature <= 0:
             raise ValueError("temperature must be finite and positive")
+        for name, value in (
+            ("round_size", self.round_size),
+            ("min_rounds", self.min_rounds),
+            ("stopping_patience", self.stopping_patience),
+        ):
+            if isinstance(value, (bool, np.bool_)) or not isinstance(value, (int, np.integer)):
+                raise ValueError(f"{name} must be a positive integer")
+            if int(value) < 1:
+                raise ValueError(f"{name} must be a positive integer")
+        if self.max_rounds is not None and (
+            isinstance(self.max_rounds, (bool, np.bool_))
+            or not isinstance(self.max_rounds, (int, np.integer))
+            or int(self.max_rounds) < 1
+        ):
+            raise ValueError("max_rounds must be a positive integer or None")
+        if not np.isfinite(self.defensive_prior_weight) or not (
+            0 < self.defensive_prior_weight <= 1
+        ):
+            raise ValueError("defensive_prior_weight must be in (0, 1]")
+        if not np.isfinite(self.proposal_tolerance) or self.proposal_tolerance <= 0:
+            raise ValueError("proposal_tolerance must be finite and positive")
+        if self.prediction_tolerance is not None and (
+            not np.isfinite(self.prediction_tolerance) or self.prediction_tolerance <= 0
+        ):
+            raise ValueError("prediction_tolerance must be finite and positive or None")
+        if self.ess_target_fraction is not None and (
+            not np.isfinite(self.ess_target_fraction)
+            or not 0 < self.ess_target_fraction <= 1
+        ):
+            raise ValueError("ess_target_fraction must be in (0, 1] or None")
+        if not np.isfinite(self.adaptation_temperature) or self.adaptation_temperature <= 0:
+            raise ValueError("adaptation_temperature must be finite and positive")
         for name, value in (
             ("min_subset_size", self.min_subset_size),
             ("max_subset_size", self.max_subset_size),
@@ -166,6 +220,19 @@ class BayesianModelAveragingBase(BaseEstimator):
         )
         self.convergence_history_ = []
 
+        self.proposal_history_: list[dict[str, float]] = []
+        self.round_history_: list[dict[str, Any]] = []
+        self.n_rounds_ = 0
+        self.effective_sample_size_ = None
+        self.effective_sample_size_fraction_ = None
+        self.adaptive_converged_ = False
+        self.stopping_reason_ = None
+        self._round_sizes_: list[int] = []
+        self._prior_family_probabilities_ = {
+            registration.adapter.name: float(registration.prior_weight)
+            for registration in self.family_registry_
+        }
+
         if self.n_estimators == "auto":
             target = min(20, int(self.max_estimators))
             auto = True
@@ -175,6 +242,12 @@ class BayesianModelAveragingBase(BaseEstimator):
         previous_prediction = None
         self._models: list[ModelDraw] = []
         self.converged_ = None if not auto else False
+
+        if self.adaptive_importance_sampling:
+            self._fit_adaptive(X, y)
+            self.n_estimators_ = len(self._models)
+            self.converged_ = self.adaptive_converged_
+            return self
 
         while True:
             start = len(self._models)
@@ -209,9 +282,24 @@ class BayesianModelAveragingBase(BaseEstimator):
             target = min(len(self._models) * 2, int(self.max_estimators))
 
         self.n_estimators_ = len(self._models)
+        self.effective_sample_size_, self.effective_sample_size_fraction_ = (
+            recompute_importance_weights(
+                self._models,
+                target_temperature=self.temperature,
+                adaptive=False,
+            )
+        )
         return self
 
-    def _prepare_model(self, X: Any, y: np.ndarray, seed: int) -> Any:
+    def _prepare_model(
+        self,
+        X: Any,
+        y: np.ndarray,
+        seed: int,
+        family_proposal_probabilities: Sequence[float] | None = None,
+        round_index: int = 0,
+        proposal_id: str = "prior-0",
+    ) -> Any:
         return prepare_model(
             X,
             y,
@@ -235,13 +323,190 @@ class BayesianModelAveragingBase(BaseEstimator):
             epsilon=self.epsilon,
             seed=seed,
             classes=self.classes_,
+            family_proposal_probabilities=family_proposal_probabilities,
+            round_index=round_index,
+            proposal_id=proposal_id,
         )
 
+    def _fit_batch(
+        self,
+        X: Any,
+        y: np.ndarray,
+        *,
+        start: int,
+        count: int,
+        family_proposal: dict[str, float] | None = None,
+        round_index: int = 0,
+        proposal_id: str = "prior-0",
+    ) -> list[ModelDraw]:
+        seeds = [child_seed(self._base_seed, index) for index in range(start, start + count)]
+        proposal_values = None
+        if family_proposal is not None:
+            proposal_values = [
+                family_proposal[registration.adapter.name]
+                for registration in self.family_registry_
+            ]
+        prepared_models = Parallel(n_jobs=self.n_jobs)(
+            delayed(self._prepare_model)(
+                X,
+                y,
+                seed,
+                proposal_values,
+                round_index,
+                proposal_id,
+            )
+            for seed in seeds
+        )
+        scores = Parallel(n_jobs=self.n_jobs)(
+            delayed(score_prepared_model)(prepared) for prepared in prepared_models
+        )
+        return Parallel(n_jobs=self.n_jobs)(
+            delayed(fit_prepared_model)(prepared, score)
+            for prepared, score in zip(prepared_models, scores)
+        )
+
+    def _update_adaptive_weights(self) -> tuple[float, float]:
+        ess, ess_fraction = recompute_importance_weights(
+            self._models,
+            target_temperature=self.temperature,
+            adaptive=True,
+            proposal_history=self.proposal_history_,
+            round_sizes=self._round_sizes_,
+        )
+        self.model_masses_ = aggregate_model_masses(self._models)
+        self.effective_sample_size_ = ess
+        self.effective_sample_size_fraction_ = ess_fraction
+        return ess, ess_fraction
+
+    def _next_family_proposal(self) -> dict[str, float]:
+        family_mass = self.model_masses_["family"]
+        names = [registration.adapter.name for registration in self.family_registry_]
+        weighted_mass = np.asarray([family_mass.get(name, 0.0) for name in names], dtype=float)
+        weighted_mass = stable_softmax(np.log(np.maximum(weighted_mass, np.finfo(float).tiny)))
+        adapted = stable_softmax(np.log(weighted_mass) / self.adaptation_temperature)
+        proposal = (
+            self.defensive_prior_weight
+            * np.asarray([self._prior_family_probabilities_[name] for name in names])
+            + (1.0 - self.defensive_prior_weight) * adapted
+        )
+        proposal /= proposal.sum()
+        return {name: float(value) for name, value in zip(names, proposal)}
+
+    def _fit_adaptive(self, X: Any, y: np.ndarray) -> None:
+        proposal = dict(self._prior_family_probabilities_)
+        previous_proposal: dict[str, float] | None = None
+        previous_prediction = None
+        stable_rounds = 0
+        round_limit = self.max_rounds or int(np.ceil(self.max_estimators / self.round_size))
+
+        for round_index in range(round_limit):
+            remaining = int(self.max_estimators) - len(self._models)
+            if remaining <= 0:
+                self.stopping_reason_ = "max_estimators"
+                break
+            count = min(int(self.round_size), remaining)
+            proposal_id = f"round-{round_index}"
+            new_models = self._fit_batch(
+                X,
+                y,
+                start=len(self._models),
+                count=count,
+                family_proposal=proposal,
+                round_index=round_index,
+                proposal_id=proposal_id,
+            )
+            self._models.extend(new_models)
+            self.proposal_history_.append(dict(proposal))
+            self._round_sizes_.append(count)
+            ess, ess_fraction = self._update_adaptive_weights()
+
+            proposal_distance = None
+            if previous_proposal is not None:
+                proposal_distance = float(
+                    0.5
+                    * sum(
+                        abs(proposal[name] - previous_proposal[name])
+                        for name in proposal
+                    )
+                )
+            prediction_change = None
+            current_prediction = None
+            if self.prediction_tolerance is not None:
+                current_prediction = self._predict_outputs(X[self.convergence_subset_indices_])
+                if previous_prediction is not None:
+                    metrics = compare_predictions(previous_prediction, current_prediction)
+                    prediction_change = convergence_difference(metrics, self.convergence_metric)
+                    metrics["n_estimators"] = len(self._models)
+                    metrics["difference"] = prediction_change
+                    self.convergence_history_.append(metrics)
+
+            proposal_stable = (
+                proposal_distance is not None
+                and proposal_distance <= self.proposal_tolerance
+            )
+            prediction_stable = (
+                self.prediction_tolerance is None
+                or (
+                    prediction_change is not None
+                    and prediction_change <= self.prediction_tolerance
+                )
+            )
+            ess_stable = (
+                self.ess_target_fraction is None
+                or ess_fraction >= self.ess_target_fraction
+            )
+            conditions_met = (
+                round_index + 1 >= int(self.min_rounds)
+                and proposal_stable
+                and prediction_stable
+                and ess_stable
+            )
+            stable_rounds = stable_rounds + 1 if conditions_met else 0
+            converged = stable_rounds >= int(self.stopping_patience)
+            stop_reason = "converged" if converged else None
+            if not converged and len(self._models) >= int(self.max_estimators):
+                stop_reason = "max_estimators"
+            elif not converged and round_index + 1 >= round_limit:
+                stop_reason = "max_rounds"
+
+            self.round_history_.append(
+                {
+                    "round_index": round_index,
+                    "new_draws": count,
+                    "cumulative_draws": len(self._models),
+                    "proposal_probabilities": dict(proposal),
+                    "posterior_family_mass": dict(self.model_masses_["family"]),
+                    "proposal_distance": proposal_distance,
+                    "prediction_change": prediction_change,
+                    "effective_sample_size": ess,
+                    "effective_sample_size_fraction": ess_fraction,
+                    "maximum_normalized_weight": max(
+                        model.posterior_weight for model in self._models
+                    ),
+                    "convergence_conditions_met": conditions_met,
+                    "stopping_reason": stop_reason,
+                }
+            )
+            self.n_rounds_ = round_index + 1
+            if converged:
+                self.adaptive_converged_ = True
+                self.stopping_reason_ = "converged"
+                break
+            if stop_reason is not None:
+                self.stopping_reason_ = stop_reason
+                break
+
+            previous_proposal = proposal
+            if current_prediction is not None:
+                previous_prediction = current_prediction
+            proposal = self._next_family_proposal()
+
     def _update_weights(self) -> None:
-        log_scores = np.array([model.log_importance_weight for model in self._models])
-        weights = stable_softmax(log_scores / self.temperature)
-        for model, weight in zip(self._models, weights):
-            model.posterior_weight = float(weight)
+        recompute_importance_weights(
+            self._models,
+            target_temperature=self.temperature,
+            adaptive=False,
+        )
         self.model_masses_ = aggregate_model_masses(self._models)
 
     def _validate_predict_X(self, X: Any) -> Any:

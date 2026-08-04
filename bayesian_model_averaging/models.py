@@ -7,8 +7,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
+from scipy.special import logsumexp
 
 from .priors import ParameterDraw, ScalePriorDraw
+from .utils import stable_softmax
 
 
 def _scale_draw_dict(draw: ScalePriorDraw | None) -> dict[str, Any] | None:
@@ -42,9 +44,10 @@ class ModelDraw:
     estimator: Any = field(default=None, repr=False)
     log_importance_weight: float = 0.0
     posterior_weight: float = 0.0
-
-    def __post_init__(self) -> None:
-        self.log_importance_weight = self.cv_log_pseudo_likelihood
+    round_index: int = 0
+    proposal_id: str = "prior-0"
+    family_proposal_probability: float = 1.0
+    generating_log_proposal: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         subset_draw = self.subset_scale_draw
@@ -53,11 +56,15 @@ class ModelDraw:
             "family_prior_probability": self.family_prior_probability,
             "parameters": dict(self.parameters),
             "parameter_prior": self.parameter_prior.to_dict(),
+            "round_index": self.round_index,
+            "proposal_id": self.proposal_id,
+            "family_proposal_probability": self.family_proposal_probability,
             "subset_size": self.subset_size,
             "subset_indices": self.subset_indices.copy(),
             "subset_scale_draw": _scale_draw_dict(subset_draw),
             "log_prior": self.log_prior,
             "log_proposal": self.log_proposal,
+            "generating_log_proposal": self.generating_log_proposal,
             "cv_log_pseudo_likelihood": self.cv_log_pseudo_likelihood,
             "log_importance_weight": self.log_importance_weight,
             "posterior_weight": self.posterior_weight,
@@ -107,3 +114,61 @@ def aggregate_model_masses(draws: Sequence[ModelDraw]) -> dict[str, Any]:
         "family": dict(sorted(family_mass.items())),
         "parameter": dict(sorted(parameter_mass.items())),
     }
+
+
+def recompute_importance_weights(
+    draws: Sequence[ModelDraw],
+    *,
+    target_temperature: float,
+    adaptive: bool,
+    proposal_history: Sequence[dict[str, float]] = (),
+    round_sizes: Sequence[int] = (),
+) -> tuple[float, float]:
+    """Compute corrected log weights and return ESS and ESS fraction.
+
+    Adaptive proposals currently change only the estimator-family factor. All
+    conditional factors remain at their declared prior, so the deterministic
+    mixture denominator can be evaluated from round family probabilities.
+    """
+
+    if not draws:
+        raise ValueError("draws must contain at least one model")
+    if not np.isfinite(target_temperature) or target_temperature <= 0:
+        raise ValueError("target_temperature must be finite and positive")
+
+    if adaptive:
+        if len(proposal_history) != len(round_sizes) or not proposal_history:
+            raise ValueError("adaptive weighting requires proposal history and round sizes")
+        if any(size < 1 for size in round_sizes) or sum(round_sizes) != len(draws):
+            raise ValueError("round sizes must partition the complete draw population")
+        log_round_mass = np.log(np.asarray(round_sizes, dtype=float) / sum(round_sizes))
+
+    log_weights = []
+    for draw in draws:
+        if adaptive:
+            conditional_log_prior = draw.log_prior - np.log(draw.family_prior_probability)
+            family_terms = [
+                log_round_mass[round_index] + np.log(proposal[draw.family_name])
+                for round_index, proposal in enumerate(proposal_history)
+            ]
+            draw.log_proposal = float(conditional_log_prior + logsumexp(family_terms))
+        elif draw.generating_log_proposal is not None:
+            draw.log_proposal = float(draw.generating_log_proposal)
+
+        if not adaptive and draw.generating_log_proposal is not None:
+            # With q(theta) == p(theta), preserve the existing score-only
+            # behavior exactly while retaining the general formula above for
+            # adaptive proposals.
+            draw.log_importance_weight = float(
+                draw.cv_log_pseudo_likelihood / target_temperature
+            )
+        else:
+            log_target = draw.log_prior + draw.cv_log_pseudo_likelihood / target_temperature
+            draw.log_importance_weight = float(log_target - draw.log_proposal)
+        log_weights.append(draw.log_importance_weight)
+
+    normalized = stable_softmax(np.asarray(log_weights, dtype=float))
+    for draw, weight in zip(draws, normalized):
+        draw.posterior_weight = float(weight)
+    ess = float(1.0 / np.sum(normalized**2))
+    return ess, float(ess / len(draws))

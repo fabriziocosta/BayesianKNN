@@ -60,6 +60,28 @@ model = BayesianModelAveragingClassifier(
 )
 ```
 
+Adaptive importance sampling is opt-in. The declared family weights remain the
+target prior; later rounds only change computational allocation through a
+defensive proposal, with deterministic-mixture importance correction:
+
+```python
+model = BayesianModelAveragingClassifier(
+    adaptive_importance_sampling=True,
+    round_size=50,
+    max_estimators=500,
+    defensive_prior_weight=0.2,
+    proposal_tolerance=1e-3,
+    stopping_patience=2,
+    random_state=7,
+)
+```
+
+`temperature` is the target pseudo-posterior temperature. The separate
+`adaptation_temperature` controls how concentrated family proposals become.
+Adaptive rounds stop when enabled proposal, prediction, and ESS criteria remain
+stable for the configured patience, or when the estimator/round budget is hit.
+The learned proposal is never treated as an updated prior.
+
 The full design and implementation documentation is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 For a minimal end-to-end example, see
