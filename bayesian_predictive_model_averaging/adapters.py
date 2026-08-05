@@ -324,11 +324,11 @@ class RandomForestAdapter(BaseEstimator):
 
     def __init__(
         self,
-        n_estimators_values: Sequence[int] = (25, 50, 100),
-        max_depth_values: Sequence[int | None] = (2, 3, 4, 6, 8, None),
-        min_samples_leaf_values: Sequence[int] = (1, 2, 4, 8, 16),
+        n_estimators_values: Sequence[int] = (100, 200, 400),
+        max_depth_values: Sequence[int | None] = (4, 6, 8, None),
+        min_samples_leaf_values: Sequence[int] = (1, 2, 4),
         min_samples_split_values: Sequence[int] = (2, 4, 8, 16, 32),
-        max_features_values: Sequence[str | float] = ("sqrt", 1.0),
+        max_features_values: Sequence[str | float] = (1.0,),
         simplicity: float = 1.0,
     ) -> None:
         self.n_estimators_values = tuple(n_estimators_values)

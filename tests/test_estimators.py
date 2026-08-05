@@ -336,7 +336,7 @@ def test_random_forest_adapter_supports_classification_and_regression(data):
     ).fit(X, y)
     classifier_draws = classifier.get_model_draws()
     assert all(draw["family_name"] == "random_forest" for draw in classifier_draws)
-    assert all(draw["parameters"]["n_estimators"] in {25, 50, 100} for draw in classifier_draws)
+    assert all(draw["parameters"]["n_estimators"] in {100, 200, 400} for draw in classifier_draws)
     assert all(draw["parameters"]["criterion"] in {"gini", "entropy"} for draw in classifier_draws)
     assert classifier.predict_proba(X[:3]).shape == (3, 3)
 
