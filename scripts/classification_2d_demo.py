@@ -36,6 +36,8 @@ def run_and_report(
         print(f"dataset: {result.dataset}")
         print(f"runtime: {runtime_seconds:.2f}s")
         print(f"test accuracy: {result.test_accuracy:.3f}")
+        num_errors = int((result.y_pred != result.y_test).sum())
+        print(f"test errors: {num_errors}/{len(result.y_test)}")
         print(format_error_comparison(result))
         print(f"estimators used: {result.model.n_estimators_}")
         print(f"converged: {result.model.converged_}")
