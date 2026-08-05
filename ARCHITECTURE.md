@@ -139,7 +139,7 @@ registry normalizes positive weights to sum to one, rejects duplicate names,
 and filters families that do not support the requested task. A one-entry
 registry is therefore a fixed-family ensemble. If `family_registry` is not
 specified, the default is a uniform mixture of k-NN, gated linear-mixture,
-Gaussian-mixture, MLP, and decision-tree families.
+Gaussian-mixture, MLP, and random-forest families.
 
 ### Adapter responsibilities
 
@@ -178,6 +178,7 @@ override `predictive_concentration`, but the value must be positive and finite.
 | `LinearMixtureAdapter` | gated logistic experts | gated ridge experts | expert count, expert/gate regularization |
 | `MLPAdapter` | `MLPClassifier` | `MLPRegressor` | architecture, activation, regularization, learning rate |
 | `DecisionTreeAdapter` | `DecisionTreeClassifier` | `DecisionTreeRegressor` | depth, split/leaf sizes, criterion, splitter |
+| `RandomForestAdapter` | `RandomForestClassifier` | `RandomForestRegressor` | tree count, depth, split/leaf sizes, criterion, max features |
 
 The `GaussianAdapter` fits a single Gaussian likelihood for every class. The
 default `GaussianMixtureAdapter` instead fits a separate Gaussian mixture for
@@ -445,7 +446,7 @@ parameter. The method name is retained for API stability:
 
 ```python
 {
-    "family": {"gaussian_mixture": ..., "knn": ..., "linear_mixture": ..., "mlp": ..., "decision_tree": ...},
+    "family": {"gaussian_mixture": ..., "knn": ..., "linear_mixture": ..., "mlp": ..., "random_forest": ...},
     "parameter": {
         "gaussian_mixture": {
             "covariance_structure": {...},

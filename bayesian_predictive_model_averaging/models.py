@@ -161,12 +161,15 @@ def recompute_importance_weights(
             # behavior exactly while retaining the general formula above for
             # adaptive proposals.
             draw.log_importance_weight = float(
+                draw.cv_log_pseudo_likelihood
+            )
+            log_weights.append(
                 draw.cv_log_pseudo_likelihood / target_temperature
             )
         else:
             log_target = draw.log_prior + draw.cv_log_pseudo_likelihood / target_temperature
             draw.log_importance_weight = float(log_target - draw.log_proposal)
-        log_weights.append(draw.log_importance_weight)
+            log_weights.append(draw.log_importance_weight)
 
     normalized = stable_softmax(np.asarray(log_weights, dtype=float))
     for draw, weight in zip(draws, normalized):

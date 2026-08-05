@@ -54,7 +54,7 @@ def test_prior_proposal_reduces_to_score_only_weights():
     )
     assert np.allclose(
         [draw.posterior_weight for draw in draws],
-        np.exp([-0.0, -1.0]) / np.exp([-0.0, -1.0]).sum(),
+        np.exp([0.0, 1.0]) / np.exp([0.0, 1.0]).sum(),
     )
 
 

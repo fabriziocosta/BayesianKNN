@@ -22,6 +22,7 @@ from bayesian_predictive_model_averaging import (
     LogisticScalePrior,
     MLPAdapter,
     ParameterDraw,
+    RandomForestAdapter,
     RecursivePartitionLinearAdapter,
     RecursivePartitionQDAAdapter,
     RecursivePartitionQuadraticAdapter,
@@ -224,7 +225,7 @@ def test_default_registry_contains_built_in_families(data):
         random_state=7,
     ).fit(X, y)
     names = {draw["family_name"] for draw in estimator.get_model_draws()}
-    assert names == {"knn", "linear_mixture", "gaussian_mixture", "mlp", "decision_tree"}
+    assert names == {"knn", "linear_mixture", "gaussian_mixture", "mlp", "random_forest"}
     assert all(
         draw["family_prior_probability"] == pytest.approx(1 / 5)
         for draw in estimator.get_model_draws()
@@ -239,7 +240,7 @@ def test_default_registry_contains_built_in_families(data):
     )
     assert np.isclose(sum(masses["parameter"]["knn"]["n_neighbors"].values()), 1.0)
     assert np.isclose(sum(masses["parameter"]["gaussian_mixture"]["n_components"].values()), 1.0)
-    assert np.isclose(sum(masses["parameter"]["decision_tree"]["max_depth"].values()), 1.0)
+    assert np.isclose(sum(masses["parameter"]["random_forest"]["max_depth"].values()), 1.0)
 
 
 def test_explicit_family_weights_are_normalized(data):
@@ -321,6 +322,29 @@ def test_decision_tree_adapter_supports_classification_and_regression(data):
     ).fit(X, y_reg)
     regression_draws = regressor.get_model_draws()
     assert all(draw["family_name"] == "decision_tree" for draw in regression_draws)
+    assert all(
+        draw["parameters"]["criterion"] == "squared_error"
+        for draw in regression_draws
+    )
+    assert regressor.predict(X[:3]).shape == (3,)
+
+
+def test_random_forest_adapter_supports_classification_and_regression(data):
+    X, y, y_reg = data
+    classifier = BayesianPredictiveModelAveragingClassifier(
+        **{**estimator_kwargs(RandomForestAdapter()), "n_estimators": 3}
+    ).fit(X, y)
+    classifier_draws = classifier.get_model_draws()
+    assert all(draw["family_name"] == "random_forest" for draw in classifier_draws)
+    assert all(draw["parameters"]["n_estimators"] in {25, 50, 100} for draw in classifier_draws)
+    assert all(draw["parameters"]["criterion"] in {"gini", "entropy"} for draw in classifier_draws)
+    assert classifier.predict_proba(X[:3]).shape == (3, 3)
+
+    regressor = BayesianPredictiveModelAveragingRegressor(
+        **{**estimator_kwargs(RandomForestAdapter()), "n_estimators": 3}
+    ).fit(X, y_reg)
+    regression_draws = regressor.get_model_draws()
+    assert all(draw["family_name"] == "random_forest" for draw in regression_draws)
     assert all(
         draw["parameters"]["criterion"] == "squared_error"
         for draw in regression_draws

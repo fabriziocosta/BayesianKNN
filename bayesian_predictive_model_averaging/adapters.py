@@ -8,6 +8,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import numpy as np
 from sklearn.base import BaseEstimator
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import BayesianRidge, LogisticRegression, Ridge
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.neural_network import MLPClassifier, MLPRegressor
@@ -304,6 +305,169 @@ class DecisionTreeAdapter(BaseEstimator):
             min_samples_split=int(parameters["min_samples_split"]),
             criterion=str(parameters["criterion"]),
             splitter=str(parameters["splitter"]),
+            random_state=random_state,
+        )
+
+    def predictive_concentration(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+    ) -> float:
+        return 1.0
+
+
+class RandomForestAdapter(BaseEstimator):
+    """Adapter for random-forest classifiers and regressors."""
+
+    name = "random_forest"
+    supported_tasks = frozenset({"classification", "regression"})
+
+    def __init__(
+        self,
+        n_estimators_values: Sequence[int] = (25, 50, 100),
+        max_depth_values: Sequence[int | None] = (2, 3, 4, 6, 8, None),
+        min_samples_leaf_values: Sequence[int] = (1, 2, 4, 8, 16),
+        min_samples_split_values: Sequence[int] = (2, 4, 8, 16, 32),
+        max_features_values: Sequence[str | float] = ("sqrt", 1.0),
+        simplicity: float = 1.0,
+    ) -> None:
+        self.n_estimators_values = tuple(n_estimators_values)
+        self.max_depth_values = tuple(max_depth_values)
+        self.min_samples_leaf_values = tuple(min_samples_leaf_values)
+        self.min_samples_split_values = tuple(min_samples_split_values)
+        self.max_features_values = tuple(max_features_values)
+        self.simplicity = simplicity
+
+    def sample_parameters(
+        self,
+        context: SamplingContext,
+        rng: np.random.Generator,
+    ) -> ParameterDraw:
+        estimator_values = tuple(
+            value
+            for value in self.n_estimators_values
+            if isinstance(value, (int, np.integer))
+            and not isinstance(value, (bool, np.bool_))
+            and int(value) >= 1
+        )
+        if not estimator_values:
+            raise ValueError("no valid n_estimators choices")
+        n_estimators, n_estimators_log_probability, n_estimators_metadata = (
+            SimplicityCategoricalPrior(
+                estimator_values,
+                estimator_values,
+                simplicity=float(self.simplicity),
+            ).draw(rng)
+        )
+
+        depth_complexities = [
+            2**int(depth) if depth is not None else 2 ** (context.n_features + 3)
+            for depth in self.max_depth_values
+        ]
+        max_depth, depth_log_probability, depth_metadata = SimplicityCategoricalPrior(
+            self.max_depth_values,
+            depth_complexities,
+            simplicity=float(self.simplicity),
+        ).draw(rng)
+
+        leaf_values = tuple(
+            value
+            for value in self.min_samples_leaf_values
+            if isinstance(value, (int, np.integer))
+            and not isinstance(value, (bool, np.bool_))
+            and 1 <= int(value) <= context.subset_size
+        )
+        if not leaf_values:
+            raise ValueError("no valid min_samples_leaf choices for the sampled subset")
+        min_samples_leaf, leaf_log_probability, leaf_metadata = SimplicityCategoricalPrior(
+            leaf_values,
+            leaf_values,
+            simplicity=float(self.simplicity),
+        ).draw(rng)
+
+        split_values = tuple(
+            value
+            for value in self.min_samples_split_values
+            if isinstance(value, (int, np.integer))
+            and not isinstance(value, (bool, np.bool_))
+            and 2 <= int(value) <= context.subset_size
+        )
+        if not split_values:
+            raise ValueError("no valid min_samples_split choices for the sampled subset")
+        min_samples_split, split_log_probability, split_metadata = SimplicityCategoricalPrior(
+            split_values,
+            split_values,
+            simplicity=float(self.simplicity),
+        ).draw(rng)
+
+        criterion_values = (
+            ("gini", "entropy")
+            if context.task == "classification"
+            else ("squared_error",)
+        )
+        criterion, criterion_log_probability, criterion_metadata = CategoricalPrior(
+            criterion_values
+        ).draw(rng)
+        max_features, max_features_log_probability, max_features_metadata = CategoricalPrior(
+            self.max_features_values
+        ).draw(rng)
+
+        return ParameterDraw(
+            parameters={
+                "n_estimators": int(n_estimators),
+                "max_depth": None if max_depth is None else int(max_depth),
+                "min_samples_leaf": int(min_samples_leaf),
+                "min_samples_split": int(min_samples_split),
+                "criterion": str(criterion),
+                "max_features": max_features,
+            },
+            log_probability=float(
+                n_estimators_log_probability
+                + depth_log_probability
+                + leaf_log_probability
+                + split_log_probability
+                + criterion_log_probability
+                + max_features_log_probability
+            ),
+            metadata={
+                "n_estimators": _categorical_metadata(
+                    n_estimators, n_estimators_log_probability, n_estimators_metadata
+                ),
+                "max_depth": _categorical_metadata(
+                    max_depth, depth_log_probability, depth_metadata
+                ),
+                "min_samples_leaf": _categorical_metadata(
+                    min_samples_leaf, leaf_log_probability, leaf_metadata
+                ),
+                "min_samples_split": _categorical_metadata(
+                    min_samples_split, split_log_probability, split_metadata
+                ),
+                "criterion": _categorical_metadata(
+                    criterion, criterion_log_probability, criterion_metadata
+                ),
+                "max_features": _categorical_metadata(
+                    max_features, max_features_log_probability, max_features_metadata
+                ),
+            },
+        )
+
+    def build_estimator(
+        self,
+        task: str,
+        parameters: Mapping[str, Any],
+        random_state: int,
+    ) -> BaseEstimator:
+        estimator_class = (
+            RandomForestClassifier if task == "classification" else RandomForestRegressor
+        )
+        return estimator_class(
+            n_estimators=int(parameters["n_estimators"]),
+            max_depth=parameters["max_depth"],
+            min_samples_leaf=int(parameters["min_samples_leaf"]),
+            min_samples_split=int(parameters["min_samples_split"]),
+            criterion=str(parameters["criterion"]),
+            max_features=parameters["max_features"],
+            n_jobs=1,
             random_state=random_state,
         )
 
@@ -1023,7 +1187,7 @@ def default_family_registry() -> tuple[FamilyRegistration, ...]:
             LinearMixtureAdapter(),
             GaussianMixtureAdapter(),
             MLPAdapter(),
-            DecisionTreeAdapter(),
+            RandomForestAdapter(),
         )
     )
 

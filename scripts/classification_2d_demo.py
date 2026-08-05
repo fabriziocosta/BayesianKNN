@@ -97,17 +97,25 @@ def run_and_report(
         print(
             format_family_parameter_shares(
                 result,
-                "decision_tree",
-                "max_depth",
-                "  decision tree max-depth posterior shares",
+                "random_forest",
+                "n_estimators",
+                "  random-forest tree-count posterior shares",
             )
         )
         print(
             format_family_parameter_shares(
                 result,
-                "decision_tree",
+                "random_forest",
+                "max_depth",
+                "  random-forest max-depth posterior shares",
+            )
+        )
+        print(
+            format_family_parameter_shares(
+                result,
+                "random_forest",
                 "criterion",
-                "  decision tree criterion posterior shares",
+                "  random-forest criterion posterior shares",
             )
         )
         print(format_convergence_history(result))

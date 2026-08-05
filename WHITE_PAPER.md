@@ -29,7 +29,7 @@ this uncertainty while retaining the practical interfaces of scikit-learn.
 
 BPMA treats the estimator family itself as uncertain. A family can be a
 k-nearest-neighbour model, a linear or gated linear mixture, a Gaussian model,
-a mixture model, a neural network, a decision tree, or a user-provided adapter.
+a mixture model, a neural network, a random forest, or a user-provided adapter.
 The same engine can therefore average models with very different parameter
 spaces without putting family-specific logic into the ensemble core.
 
